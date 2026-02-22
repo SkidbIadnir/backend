@@ -3,7 +3,7 @@ name: CI/CD Pipeline
 on:
   push:
     branches:
-      - main # Run the workflow on pushes to the main branch
+      - master # Run the workflow on pushes to the master branch
 
 jobs:
   build-and-push:
