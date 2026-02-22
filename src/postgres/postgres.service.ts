@@ -34,6 +34,7 @@ export class PostgresService {
     smws_archive: boolean;
     smws_lookout: boolean;
     smws_distilleries: boolean;
+    user_alerts: boolean;
   }> {
     const client = await this.pool.connect();
     try {
@@ -42,6 +43,7 @@ export class PostgresService {
         'smws_archive',
         'smws_lookout',
         'smws_distilleries',
+        'user_alerts',
       ];
 
       const results = {
@@ -49,6 +51,7 @@ export class PostgresService {
         smws_archive: false,
         smws_lookout: false,
         smws_distilleries: false,
+        user_alerts: false,
       };
 
       for (const tableName of tableNames) {
@@ -80,8 +83,8 @@ export class PostgresService {
           id SERIAL PRIMARY KEY,
           name VARCHAR(255) NOT NULL,
           fullCode VARCHAR(100) NOT NULL UNIQUE,
-          distillery_code VARCHAR(10) NOT NULL,
-          cask_no VARCHAR(50) NOT NULL,
+          distillery_code VARCHAR(10),
+          cask_no VARCHAR(50),
           price VARCHAR(50),
           profile TEXT,
           abv VARCHAR(20),
@@ -89,12 +92,58 @@ export class PostgresService {
           cask_type VARCHAR(100),
           distillery VARCHAR(255),
           region VARCHAR(100),
-          available VARCHAR(50),
+          available BOOLEAN DEFAULT TRUE,
           url TEXT,
           is_new BOOLEAN DEFAULT FALSE,
+          new_since TIMESTAMP,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
+      `);
+      
+      // Add new_since column if it doesn't exist (migration)
+      await client.query(`
+        ALTER TABLE smws_live 
+        ADD COLUMN IF NOT EXISTS new_since TIMESTAMP
+      `);
+      
+      // Change available to BOOLEAN if it's still VARCHAR (migration)
+      await client.query(`
+        DO $$
+        BEGIN
+          IF EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = 'smws_live' AND column_name = 'available' 
+            AND data_type = 'character varying'
+          ) THEN
+            ALTER TABLE smws_live 
+            ALTER COLUMN available TYPE BOOLEAN 
+            USING CASE WHEN available = 'true' THEN TRUE ELSE FALSE END;
+          END IF;
+        END $$;
+      `);
+      
+      // Make distillery_code and cask_no nullable (migration)
+      await client.query(`
+        DO $$
+        BEGIN
+          ALTER TABLE smws_live 
+          ALTER COLUMN distillery_code DROP NOT NULL;
+        EXCEPTION
+          WHEN undefined_column THEN NULL;
+          WHEN others THEN NULL;
+        END $$;
+      `);
+      
+      await client.query(`
+        DO $$
+        BEGIN
+          ALTER TABLE smws_live 
+          ALTER COLUMN cask_no DROP NOT NULL;
+        EXCEPTION
+          WHEN undefined_column THEN NULL;
+          WHEN others THEN NULL;
+        END $$;
       `);
 
       this.logger.log('Creating smws_archive table...');
@@ -140,6 +189,19 @@ export class PostgresService {
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           UNIQUE(smws_id, category)
+        )
+      `);
+
+      this.logger.log('Creating user_alerts table...');
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS user_alerts (
+          id SERIAL PRIMARY KEY,
+          user_id VARCHAR(100) NOT NULL,
+          guild_id VARCHAR(100) NOT NULL,
+          alert_type VARCHAR(50) NOT NULL,
+          alert_value VARCHAR(255) NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT unique_alert UNIQUE(user_id, guild_id, alert_type, alert_value)
         )
       `);
 
@@ -269,6 +331,19 @@ export class PostgresService {
         ? 'All tables already exist, distilleries data checked'
         : 'Tables created and distilleries data populated',
     };
+  }
+
+  async query(sql: string, params?: any[]): Promise<any[]> {
+    const client = await this.pool.connect();
+    try {
+      const result = await client.query(sql, params);
+      return result.rows;
+    } catch (error) {
+      this.logger.error('Query failed:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async onModuleDestroy() {
