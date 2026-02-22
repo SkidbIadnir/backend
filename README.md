@@ -52,7 +52,7 @@ Required variables:
 - `POSTGRES_PASSWORD`
 - `DISCORD_BOT_TOKEN`
 
-## Installation & run
+## Installation & rune
 
 ```bash
 npm install
