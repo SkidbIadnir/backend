@@ -57,7 +57,7 @@ export class ScraperService {
     if (!this.browser) {
       this.logger.log("Launching browser...");
       this.browser = await firefox.launch({
-        headless: false, // Set to false to see the browser in action
+        headless: true,
         args: [
           '--no-sandbox', 
           '--disable-setuid-sandbox',
