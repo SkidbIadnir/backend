@@ -44,6 +44,7 @@ export interface ScrapedWhiskyListItem {
 export class ScraperService {
   private readonly logger = new Logger(ScraperService.name);
   private browser: Browser | null = null;
+  private readonly emptyPageRetryDelayMs = 10000;
 
   constructor(
     private readonly postgresService: PostgresService,
@@ -121,7 +122,7 @@ export class ScraperService {
       try {
         // Only navigate if not already on page 1
         if (currentPage > 1 || !startFromPage1) {
-          const pageUrl = `https://smws.eu/all-whisky?min-price=0&max-price=0&sort=featured&per-page=16&filter-page=${currentPage}`;
+          const pageUrl = `https://smws.eu/all-whisky?min-price=0&max-price=0&sort=newest&per-page=16&filter-page=${currentPage}`;
           await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
         }
         
@@ -129,7 +130,7 @@ export class ScraperService {
         await this.delay(2000);
 
         // Extract whisky cards from current page
-        const pageWhiskies = await page.evaluate(() => {
+        let pageWhiskies = await page.evaluate(() => {
           const container = document.querySelector('#product-listing-container');
           if (!container) return [];
 
@@ -139,6 +140,25 @@ export class ScraperService {
             href: card.getAttribute('href') || '',
           }));
         });
+
+        // Failsafe: sometimes the next page is briefly empty before products render
+        if (pageWhiskies.length === 0) {
+          this.logger.warn(
+            `Page ${currentPage} returned 0 products. Waiting ${this.emptyPageRetryDelayMs / 1000}s and retrying before stopping.`,
+          );
+          await this.delay(this.emptyPageRetryDelayMs);
+
+          pageWhiskies = await page.evaluate(() => {
+            const container = document.querySelector('#product-listing-container');
+            if (!container) return [];
+
+            const cards = container.querySelectorAll('.card-title a');
+            return Array.from(cards).map(card => ({
+              title: card.textContent?.trim() || '',
+              href: card.getAttribute('href') || '',
+            }));
+          });
+        }
 
         if (pageWhiskies.length === 0) {
           this.logger.log(`No products found on page ${currentPage}. Reached end.`);
@@ -741,7 +761,7 @@ export class ScraperService {
         await page.waitForSelector('#product-listing-container', { timeout: 15000 });
         await this.delay(2000);
 
-        const pageWhiskies = await page.evaluate(() => {
+        let pageWhiskies = await page.evaluate(() => {
           const container = document.querySelector('#product-listing-container');
           if (!container) return [];
 
@@ -751,6 +771,25 @@ export class ScraperService {
             href: card.getAttribute('href') || '',
           }));
         });
+
+        // Failsafe: sometimes pagination briefly shows an empty listing before products render
+        if (pageWhiskies.length === 0) {
+          this.logger.warn(
+            `Archive page ${currentPage} returned 0 products. Waiting ${this.emptyPageRetryDelayMs / 1000}s and retrying before stopping.`,
+          );
+          await this.delay(this.emptyPageRetryDelayMs);
+
+          pageWhiskies = await page.evaluate(() => {
+            const container = document.querySelector('#product-listing-container');
+            if (!container) return [];
+
+            const cards = container.querySelectorAll('.card-title a');
+            return Array.from(cards).map(card => ({
+              title: card.textContent?.trim() || '',
+              href: card.getAttribute('href') || '',
+            }));
+          });
+        }
 
         if (pageWhiskies.length === 0) {
           this.logger.log(`No products found on archive page ${currentPage}. Reached end.`);
