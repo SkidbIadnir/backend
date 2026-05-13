@@ -1,40 +1,20 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PostgresService } from '../postgres/postgres.service';
-import { LiveWhiskyEntry } from './types/live-whisky-entry.type';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { SmwsLive } from '../entities/smws-live.entity';
 
 @Injectable()
 export class WatchtowerService {
   private readonly logger = new Logger(WatchtowerService.name);
 
-  constructor(private readonly postgresService: PostgresService) {}
+  constructor(
+    @InjectRepository(SmwsLive)
+    private readonly liveRepo: Repository<SmwsLive>,
+  ) {}
 
-  async getAllLiveEntries(): Promise<LiveWhiskyEntry[]> {
+  async getAllLiveEntries(): Promise<SmwsLive[]> {
     try {
-      const query = `
-        SELECT
-          id,
-          name,
-          fullCode,
-          distillery_code AS "distilleryCode",
-          cask_no AS "caskNo",
-          price,
-          profile,
-          abv,
-          age,
-          cask_type AS "caskType",
-          distillery,
-          region,
-          available,
-          url,
-          is_new AS "isNew",
-          new_since AS "newSince",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt"
-        FROM smws_live
-        ORDER BY created_at DESC
-      `;
-
-      return await this.postgresService.query(query);
+      return await this.liveRepo.find({ order: { createdAt: 'DESC' } });
     } catch (error) {
       this.logger.error('Failed to fetch live entries:', error);
       throw error;

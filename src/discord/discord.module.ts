@@ -1,9 +1,10 @@
 import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { UserAlert } from '../entities/user-alert.entity';
 import { DiscordService } from './discord.service';
-import { PostgresModule } from '../postgres/postgres.module';
 
 @Module({
-  imports: [PostgresModule],
+  imports: [TypeOrmModule.forFeature([UserAlert])],
   providers: [DiscordService],
   exports: [DiscordService],
 })

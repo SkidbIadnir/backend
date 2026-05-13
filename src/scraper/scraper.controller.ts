@@ -11,15 +11,15 @@ export class ScraperController {
   @Get('run-live')
   async runLiveScraper() {
     this.logger.log('Manual live scraper run initiated.');
-    const result = await this.scraperService.runScraper();
-    return { message: 'Live scraper completed', result };
+    await this.scraperService.runScraper();
+    return { message: 'Live scraper completed' };
   }
 
   @Get('run-archive')
   async runArchiveScraper() {
     this.logger.log('Manual archive scraper run initiated.');
-    const result = await this.scraperService.runArchiveScraper();
-    return { message: 'Archive scraper completed', result };
+    await this.scraperService.runArchiveScraper();
+    return { message: 'Archive scraper completed' };
   }
 
   @Get('test-alerts')

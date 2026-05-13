@@ -1,12 +1,17 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { PostgresService } from "../postgres/postgres.service";
+import { InjectRepository } from "@nestjs/typeorm";
+import { In, Repository } from "typeorm";
 import { DiscordService } from "../discord/discord.service";
-import { firefox, Browser, Page, BrowserContext } from "playwright";
+import { UserAlert } from "../entities/user-alert.entity";
+import { SmwsLive } from "../entities/smws-live.entity";
+import { SmwsArchive } from "../entities/smws-archive.entity";
+import { SmwsDistillery } from "../entities/smws-distillery.entity";
+import { firefox, Browser, Page } from "playwright";
 
 export interface ScrapedWhiskyData {
   name: string;
   fullCode: string;
-  distilleryId?: number | string; // Can be numeric (68) or alphanumeric (B1, G14)
+  distilleryId?: number | string;
   caskNo?: string;
   price: string;
   abv: string;
@@ -17,7 +22,6 @@ export interface ScrapedWhiskyData {
   region: string;
   available: boolean;
   url: string;
-  is_new?: boolean; // Flag to indicate if this is a newly discovered whisky
 }
 
 export interface ScrapedArchiveWhiskyData {
@@ -32,13 +36,14 @@ export interface ScrapedArchiveWhiskyData {
   region: string;
   bottleSize: string;
   url: string;
-  is_new?: boolean;
 }
 
 export interface ScrapedWhiskyListItem {
   title: string;
   href: string;
 }
+
+type AlertWhiskyFields = Pick<SmwsLive, 'distillery' | 'distilleryCode' | 'region' | 'age'>;
 
 @Injectable()
 export class ScraperService {
@@ -47,31 +52,23 @@ export class ScraperService {
   private readonly emptyPageRetryDelayMs = 10000;
 
   constructor(
-    private readonly postgresService: PostgresService,
+    @InjectRepository(SmwsLive)
+    private readonly liveRepo: Repository<SmwsLive>,
+    @InjectRepository(SmwsArchive)
+    private readonly archiveRepo: Repository<SmwsArchive>,
+    @InjectRepository(SmwsDistillery)
+    private readonly distilleryRepo: Repository<SmwsDistillery>,
     private readonly discordService: DiscordService,
   ) {}
 
-  /**
-   * Initialize browser instance
-   */
   private async initBrowser(): Promise<Browser> {
     if (!this.browser) {
       this.logger.log("Launching browser...");
-      this.browser = await firefox.launch({
-        headless: true,
-        args: [
-          '--no-sandbox', 
-          '--disable-setuid-sandbox',
-          '--ignore-certificate-errors',
-        ],
-      });
+      this.browser = await firefox.launch({ headless: true });
     }
     return this.browser;
   }
 
-  /**
-   * Close browser instance
-   */
   private async closeBrowser(): Promise<void> {
     if (this.browser) {
       this.logger.log("Closing browser...");
@@ -80,27 +77,20 @@ export class ScraperService {
     }
   }
 
-  /**
-   * Handle age verification and cookie consent
-   */
   private async handleModals(page: Page): Promise<void> {
     await this.delay(2000);
 
-    // Handle age verification - try label click (most reliable)
     try {
-      const label = page.locator('label[for="ageCheckbox"]');
-      await label.click({ timeout: 3000 });
+      await page.locator('label[for="ageCheckbox"]').click({ timeout: 3000 });
       this.logger.log('Age verification checked');
-    } catch (error) {
+    } catch {
       this.logger.log('No age verification found or already confirmed');
     }
 
-    // Handle cookie consent
     try {
-      const cookieButton = page.getByRole('button', { name: /accept all cookies|accept all|accept cookies|accept/i });
-      await cookieButton.click({ timeout: 3000 });
+      await page.getByRole('button', { name: /accept all cookies|accept all|accept cookies|accept/i }).click({ timeout: 3000 });
       this.logger.log('Cookie consent accepted');
-    } catch (error) {
+    } catch {
       this.logger.log('No cookie modal found or already accepted');
     }
 
@@ -108,81 +98,83 @@ export class ScraperService {
   }
 
   /**
-   * Collect all whisky basic info (title, href) from all pages
+   * Generic paginated card collector — reused by live and archive scrapers.
    */
-  private async collectAllWhiskyBasicInfo(page: Page, startFromPage1: boolean = true): Promise<ScrapedWhiskyListItem[]> {
-    this.logger.log('Collecting whisky list from all pages...');
+  private async collectAllPagesBasicInfo(
+    page: Page,
+    buildPageUrl: (pageNum: number) => string,
+    logLabel: string,
+  ): Promise<ScrapedWhiskyListItem[]> {
+    this.logger.log(`Collecting ${logLabel} list from all pages...`);
     const allWhiskies: ScrapedWhiskyListItem[] = [];
     let currentPage = 1;
     let hasMorePages = true;
 
+    const extractCards = () =>
+      page.evaluate(() => {
+        const container = document.querySelector('#product-listing-container');
+        if (!container) return [];
+        return Array.from(container.querySelectorAll('.card-title a')).map(card => ({
+          title: card.textContent?.trim() || '',
+          href: card.getAttribute('href') || '',
+        }));
+      });
+
     while (hasMorePages) {
-      this.logger.log(`Scraping page ${currentPage}...`);
-      
+      this.logger.log(`Scraping ${logLabel} page ${currentPage}...`);
+
       try {
-        // Only navigate if not already on page 1
-        if (currentPage > 1 || !startFromPage1) {
-          const pageUrl = `https://smws.eu/all-whisky?min-price=0&max-price=0&sort=newest&per-page=16&filter-page=${currentPage}`;
-          await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+        if (currentPage > 1) {
+          await page.goto(buildPageUrl(currentPage), { waitUntil: 'domcontentloaded', timeout: 45000 });
         }
-        
+
         await page.waitForSelector('#product-listing-container', { timeout: 15000 });
         await this.delay(2000);
 
-        // Extract whisky cards from current page
-        let pageWhiskies = await page.evaluate(() => {
-          const container = document.querySelector('#product-listing-container');
-          if (!container) return [];
+        let pageWhiskies = await extractCards();
 
-          const cards = container.querySelectorAll('.card-title a');
-          return Array.from(cards).map(card => ({
-            title: card.textContent?.trim() || '',
-            href: card.getAttribute('href') || '',
-          }));
-        });
-
-        // Failsafe: sometimes the next page is briefly empty before products render
         if (pageWhiskies.length === 0) {
           this.logger.warn(
-            `Page ${currentPage} returned 0 products. Waiting ${this.emptyPageRetryDelayMs / 1000}s and retrying before stopping.`,
+            `${logLabel} page ${currentPage} returned 0 products. Waiting ${this.emptyPageRetryDelayMs / 1000}s and retrying.`,
           );
           await this.delay(this.emptyPageRetryDelayMs);
-
-          pageWhiskies = await page.evaluate(() => {
-            const container = document.querySelector('#product-listing-container');
-            if (!container) return [];
-
-            const cards = container.querySelectorAll('.card-title a');
-            return Array.from(cards).map(card => ({
-              title: card.textContent?.trim() || '',
-              href: card.getAttribute('href') || '',
-            }));
-          });
+          pageWhiskies = await extractCards();
         }
 
         if (pageWhiskies.length === 0) {
-          this.logger.log(`No products found on page ${currentPage}. Reached end.`);
+          this.logger.log(`No products on ${logLabel} page ${currentPage}. Reached end.`);
           hasMorePages = false;
         } else {
-          this.logger.log(`Found ${pageWhiskies.length} whiskies on page ${currentPage}`);
+          this.logger.log(`Found ${pageWhiskies.length} on ${logLabel} page ${currentPage}`);
           allWhiskies.push(...pageWhiskies);
           currentPage++;
         }
       } catch (error) {
-        this.logger.error(`Error on page ${currentPage}: ${error.message}`);
+        this.logger.error(`Error on ${logLabel} page ${currentPage}: ${error.message}`);
         hasMorePages = false;
       }
     }
 
-    this.logger.log(`=== LISTING COMPLETE ===`);
-    this.logger.log(`Total pages scraped: ${currentPage - 1}`);
-    this.logger.log(`Total whiskies found: ${allWhiskies.length}`);
+    this.logger.log(`${logLabel} total — pages: ${currentPage - 1}, whiskies: ${allWhiskies.length}`);
     return allWhiskies;
   }
 
-  /**
-   * Scrape detailed information from individual whisky pages
-   */
+  private async collectAllWhiskyBasicInfo(page: Page): Promise<ScrapedWhiskyListItem[]> {
+    return this.collectAllPagesBasicInfo(
+      page,
+      (n) => `https://smws.eu/all-whisky?min-price=0&max-price=0&sort=newest&per-page=16&filter-page=${n}`,
+      'whisky',
+    );
+  }
+
+  private async collectAllArchiveWhiskyBasicInfo(page: Page): Promise<ScrapedWhiskyListItem[]> {
+    return this.collectAllPagesBasicInfo(
+      page,
+      (n) => `https://smws.eu/archive?page=${n}`,
+      'archive whisky',
+    );
+  }
+
   private async scrapeWhiskyDetails(page: Page, whiskies: ScrapedWhiskyListItem[]): Promise<ScrapedWhiskyData[]> {
     this.logger.log(`Starting detail scraping for ${whiskies.length} whiskies`);
     const detailedWhiskies: ScrapedWhiskyData[] = [];
@@ -191,7 +183,6 @@ export class ScraperService {
     for (let i = 0; i < whiskies.length; i++) {
       const whisky = whiskies[i];
       const url = whisky.href.startsWith('http') ? whisky.href : `${baseUrl}${whisky.href}`;
-
       this.logger.log(`[${i + 1}/${whiskies.length}] Scraping: ${whisky.title}`);
 
       try {
@@ -199,9 +190,8 @@ export class ScraperService {
         await page.waitForSelector('.productView-details', { timeout: 15000 });
         await this.delay(500);
 
-        // Extract whisky details
         const details = await page.evaluate(() => {
-          const getText = (selector: string) => 
+          const getText = (selector: string) =>
             document.querySelector(selector)?.textContent?.trim() || '';
 
           const getInfoValue = (infoName: string) => {
@@ -215,21 +205,14 @@ export class ScraperService {
             return '';
           };
 
-          // Skip if no cask number (not a single bottle)
-          if (!document.querySelector('.caskNo')) {
-            return null;
-          }
-
           let fullCode = getText('.caskNo');
-          // Remove "CASK NO. " prefix if present
           if (fullCode.startsWith('CASK NO. ')) {
             fullCode = fullCode.replace('CASK NO. ', '');
           }
-          
+
           let distilleryId: number | string | null = null;
           let caskNo: string | null = null;
 
-          // Parse fullCode (e.g., "68.104" or "B1.123")
           if (fullCode) {
             const match = fullCode.match(/([A-Za-z]?\d+|[A-Za-z]+\d+)\.(\d+)/);
             if (match) {
@@ -250,32 +233,47 @@ export class ScraperService {
             caskType: getInfoValue('CASK TYPE'),
             profile: getInfoValue('PROFILE'),
             region: getInfoValue('REGION'),
-            distillery: '', // Will be filled later
+            distillery: '',
             available: true,
             url: window.location.href,
-            is_new: true,
           };
         });
 
-        if (details && details.name) {
+        if (details?.name) {
           detailedWhiskies.push(details as ScrapedWhiskyData);
-        } else {
-          this.logger.log(`Skipped ${whisky.title} - not a single bottle`);
         }
       } catch (error) {
         this.logger.error(`Error scraping ${whisky.title}: ${error.message}`);
       }
     }
 
-    this.logger.log(`=== DETAIL SCRAPING COMPLETE ===`);
-    this.logger.log(`Successfully scraped: ${detailedWhiskies.length}/${whiskies.length}`);
+    this.logger.log(`Detail scraping complete — ${detailedWhiskies.length}/${whiskies.length} succeeded`);
     return detailedWhiskies;
   }
 
   /**
-   * Check new whiskies against user alerts and send notifications
+   * Determines whether a whisky matches a given user alert.
    */
-  private async checkAlertsAndNotify(newWhiskies: ScrapedWhiskyData[]): Promise<void> {
+  private matchesAlert(whisky: AlertWhiskyFields, alert: UserAlert): boolean {
+    switch (alert.alertType) {
+      case 'distillery': {
+        const nameMatch = whisky.distillery?.toLowerCase() === alert.alertValue.toLowerCase();
+        const codeMatch = whisky.distilleryCode?.toLowerCase() === alert.alertValue.toLowerCase();
+        return nameMatch || codeMatch;
+      }
+      case 'region':
+        return whisky.region?.toLowerCase() === alert.alertValue.toLowerCase();
+      case 'age': {
+        const minAge = parseInt(alert.alertValue);
+        const whiskyAge = parseInt(whisky.age || '');
+        return !isNaN(minAge) && !isNaN(whiskyAge) && whiskyAge >= minAge;
+      }
+      default:
+        return false;
+    }
+  }
+
+  private async checkAlertsAndNotify(newWhiskies: SmwsLive[]): Promise<void> {
     if (newWhiskies.length === 0) {
       this.logger.log('No new whiskies to check for alerts');
       return;
@@ -284,7 +282,6 @@ export class ScraperService {
     this.logger.log(`Checking ${newWhiskies.length} new whiskies against user alerts...`);
 
     try {
-      // Get all active alerts
       const alerts = await this.discordService.getAllAlerts();
       if (alerts.length === 0) {
         this.logger.log('No active alerts to check');
@@ -292,64 +289,33 @@ export class ScraperService {
       }
 
       this.logger.log(`Found ${alerts.length} active alerts`);
-
       let notificationsSent = 0;
 
       for (const whisky of newWhiskies) {
         for (const alert of alerts) {
-          let isMatch = false;
+          if (!this.matchesAlert(whisky, alert)) continue;
 
-          switch (alert.alert_type) {
-            case 'distillery':
-              // Match distillery name OR code (case insensitive)
-              const distilleryNameMatch = whisky.distillery?.toLowerCase() === alert.alert_value.toLowerCase();
-              const distilleryCodeMatch = whisky.distilleryId?.toString().toLowerCase() === alert.alert_value.toLowerCase();
-              isMatch = distilleryNameMatch || distilleryCodeMatch;
-              
-              // Debug logging
-              if (alert.alert_value.toLowerCase() === '59') {
-                this.logger.log(`Checking whisky "${whisky.name}": distilleryId=${whisky.distilleryId}, distillery="${whisky.distillery}", alert="${alert.alert_value}", nameMatch=${distilleryNameMatch}, codeMatch=${distilleryCodeMatch}`);
-              }
-              break;
+          this.logger.log(
+            `Alert match — user: ${alert.userId}, whisky: ${whisky.name}, alert: ${alert.alertType}=${alert.alertValue}`,
+          );
 
-            case 'region':
-              // Match region name (case insensitive)
-              isMatch = whisky.region?.toLowerCase() === alert.alert_value.toLowerCase();
-              break;
+          await this.discordService.sendAlertNotification(
+            alert.userId,
+            alert.guildId,
+            {
+              name: whisky.name,
+              distillery: whisky.distillery ?? undefined,
+              region: whisky.region ?? undefined,
+              age: whisky.age ?? undefined,
+              price: whisky.price ?? undefined,
+              abv: whisky.abv ?? undefined,
+              url: whisky.url!,
+            },
+            alert.alertType,
+            alert.alertValue,
+          );
 
-            case 'age':
-              // Match age greater than or equal to alert value
-              const minAge = parseInt(alert.alert_value);
-              const whiskyAge = parseInt(whisky.age);
-              if (!isNaN(minAge) && !isNaN(whiskyAge)) {
-                isMatch = whiskyAge >= minAge;
-              }
-              break;
-          }
-
-          if (isMatch) {
-            this.logger.log(
-              `Alert match found! User: ${alert.user_id}, Whisky: ${whisky.name}, Alert: ${alert.alert_type}=${alert.alert_value}`
-            );
-
-            await this.discordService.sendAlertNotification(
-              alert.user_id,
-              alert.guild_id,
-              {
-                name: whisky.name,
-                distillery: whisky.distillery,
-                region: whisky.region,
-                age: whisky.age,
-                price: whisky.price,
-                abv: whisky.abv,
-                url: whisky.url,
-              },
-              alert.alert_type,
-              alert.alert_value
-            );
-
-            notificationsSent++;
-          }
+          notificationsSent++;
         }
       }
 
@@ -359,24 +325,16 @@ export class ScraperService {
     }
   }
 
-  /**
-   * Test alerts against existing whiskies in database (for testing purposes)
-   */
   async testAlertsWithExistingData(): Promise<{ checked: number; matched: number }> {
     this.logger.log('=== TESTING ALERTS WITH EXISTING DATA ===');
-    
+
     try {
-      // Get all whiskies from database
-      const query = `
-        SELECT name, fullCode, distillery_code as "distilleryId", distillery, region, age, price, abv, url, available
-        FROM smws_live 
-        WHERE available = true
-        ORDER BY created_at DESC
-      `;
-      const dbWhiskies = await this.postgresService.query(query);
+      const dbWhiskies = await this.liveRepo.find({
+        where: { available: true },
+        order: { createdAt: 'DESC' },
+      });
       this.logger.log(`Found ${dbWhiskies.length} available whiskies in database`);
 
-      // Get all active alerts
       const alerts = await this.discordService.getAllAlerts();
       if (alerts.length === 0) {
         this.logger.log('No active alerts to test');
@@ -384,63 +342,32 @@ export class ScraperService {
       }
 
       this.logger.log(`Testing against ${alerts.length} active alerts`);
-
       let matchCount = 0;
 
       for (const whisky of dbWhiskies) {
         for (const alert of alerts) {
-          let isMatch = false;
+          if (!this.matchesAlert(whisky, alert)) continue;
 
-          switch (alert.alert_type) {
-            case 'distillery':
-              const distilleryNameMatch = whisky.distillery?.toLowerCase() === alert.alert_value.toLowerCase();
-              const distilleryCodeMatch = whisky.distilleryId?.toString().toLowerCase() === alert.alert_value.toLowerCase();
-              isMatch = distilleryNameMatch || distilleryCodeMatch;
-              
-              this.logger.log(
-                `Testing whisky "${whisky.name}": ` +
-                `distilleryId="${whisky.distilleryId}", distillery="${whisky.distillery}", ` +
-                `alert="${alert.alert_value}", nameMatch=${distilleryNameMatch}, codeMatch=${distilleryCodeMatch}, ` +
-                `result=${isMatch}`
-              );
-              break;
+          matchCount++;
+          this.logger.log(
+            `MATCH: "${whisky.name}" matches alert (${alert.alertType}=${alert.alertValue}) for user ${alert.userId}`,
+          );
 
-            case 'region':
-              isMatch = whisky.region?.toLowerCase() === alert.alert_value.toLowerCase();
-              break;
-
-            case 'age':
-              const minAge = parseInt(alert.alert_value);
-              const whiskyAge = parseInt(whisky.age);
-              if (!isNaN(minAge) && !isNaN(whiskyAge)) {
-                isMatch = whiskyAge >= minAge;
-              }
-              break;
-          }
-
-          if (isMatch) {
-            matchCount++;
-            this.logger.log(
-              `✅ MATCH: Whisky "${whisky.name}" matches alert (${alert.alert_type}=${alert.alert_value}) for user ${alert.user_id}`
-            );
-
-            // Send notification for testing
-            await this.discordService.sendAlertNotification(
-              alert.user_id,
-              alert.guild_id,
-              {
-                name: whisky.name,
-                distillery: whisky.distillery,
-                region: whisky.region,
-                age: whisky.age,
-                price: whisky.price,
-                abv: whisky.abv,
-                url: whisky.url,
-              },
-              alert.alert_type,
-              alert.alert_value
-            );
-          }
+          await this.discordService.sendAlertNotification(
+            alert.userId,
+            alert.guildId,
+            {
+              name: whisky.name,
+              distillery: whisky.distillery ?? undefined,
+              region: whisky.region ?? undefined,
+              age: whisky.age ?? undefined,
+              price: whisky.price ?? undefined,
+              abv: whisky.abv ?? undefined,
+              url: whisky.url!,
+            },
+            alert.alertType,
+            alert.alertValue,
+          );
         }
       }
 
@@ -452,12 +379,9 @@ export class ScraperService {
     }
   }
 
-  /**
-   * Main scraper runner
-   */
-  async runScraper(): Promise<ScrapedWhiskyData[]> {
+  async runScraper(): Promise<void> {
     this.logger.log("=== STARTING SMWS SCRAPER ===");
-    
+
     const browser = await this.initBrowser();
     const context = await browser.newContext({
       ignoreHTTPSErrors: true,
@@ -466,74 +390,57 @@ export class ScraperService {
     const page = await context.newPage();
 
     try {
-      // Step 1: Navigate and handle modals
       this.logger.log('Step 1: Navigating to SMWS...');
       await page.goto('https://smws.eu/all-whisky', { waitUntil: 'domcontentloaded', timeout: 45000 });
       await this.handleModals(page);
 
-      // Step 2: Collect all whisky basic info from all pages
       this.logger.log('Step 2: Collecting whisky list...');
-      const allWhiskies = await this.collectAllWhiskyBasicInfo(page, true);
+      const allWhiskies = await this.collectAllWhiskyBasicInfo(page);
 
-      // Step 3: Get existing whiskies from database
       this.logger.log('Step 3: Fetching existing whiskies from database...');
       const existingWhiskies = await this.getExistingWhiskiesFromDB();
       this.logger.log(`Found ${existingWhiskies.length} existing whiskies in database`);
 
-      // Step 4: Compare and find differences
       this.logger.log('Step 4: Comparing with database...');
       const newWhiskies = this.findNewWhiskies(allWhiskies, existingWhiskies);
       const removedWhiskies = this.findRemovedWhiskies(allWhiskies, existingWhiskies);
-      const existingAvailableWhiskies = allWhiskies.filter(scraped => 
-        existingWhiskies.some(existing => existing.title === scraped.title)
+      const existingAvailableWhiskies = allWhiskies.filter(scraped =>
+        existingWhiskies.some(existing => existing.title === scraped.title),
       );
 
-      this.logger.log(`New whiskies: ${newWhiskies.length}`);
-      this.logger.log(`Removed whiskies: ${removedWhiskies.length}`);
-      this.logger.log(`Existing available whiskies: ${existingAvailableWhiskies.length}`);
+      this.logger.log(`New: ${newWhiskies.length}, Removed: ${removedWhiskies.length}, Still available: ${existingAvailableWhiskies.length}`);
 
-      // Step 5: Mark removed whiskies as unavailable
       if (removedWhiskies.length > 0) {
         this.logger.log('Step 5: Marking removed whiskies as unavailable...');
         await this.markWhiskiesAsUnavailable(removedWhiskies);
       }
 
-      // Step 6: Mark existing whiskies as available
       if (existingAvailableWhiskies.length > 0) {
         this.logger.log('Step 6: Ensuring existing whiskies are available...');
         await this.markWhiskiesAsAvailable(existingAvailableWhiskies);
       }
 
-      // Step 7: Scrape details only for NEW whiskies
-      let savedCount = 0;
-      let detailedWhiskies: ScrapedWhiskyData[] = [];
+      let savedWhiskies: SmwsLive[] = [];
+
       if (newWhiskies.length > 0) {
         this.logger.log(`Step 7: Scraping details for ${newWhiskies.length} new whiskies...`);
-        detailedWhiskies = await this.scrapeWhiskyDetails(page, newWhiskies);
-        
+        const scraped = await this.scrapeWhiskyDetails(page, newWhiskies);
+
         this.logger.log('Step 8: Saving new whiskies to database...');
-        savedCount = await this.saveWhiskiesToDatabase(detailedWhiskies, true);
+        savedWhiskies = await this.saveWhiskiesToDatabase(scraped, true);
       } else {
         this.logger.log('Step 7: No new whiskies to scrape');
       }
 
-      // Step 9: Check alerts and send notifications for new whiskies
       this.logger.log('Step 9: Checking alerts for new whiskies...');
-      await this.checkAlertsAndNotify(detailedWhiskies);
+      await this.checkAlertsAndNotify(savedWhiskies);
 
-      // Step 10: Update isNew flags based on 3-day rule
       this.logger.log('Step 10: Updating isNew flags...');
       await this.updateIsNewFlags();
 
-      this.logger.log(`=== SCRAPER COMPLETED ===`);
-      this.logger.log(`Total new whiskies found: ${newWhiskies.length}`);
-      this.logger.log(`Total whiskies saved: ${savedCount}`);
-      this.logger.log(`Whiskies marked unavailable: ${removedWhiskies.length}`);
-      
-      return [];
+      this.logger.log(`=== SCRAPER COMPLETED — new: ${newWhiskies.length}, saved: ${savedWhiskies.length}, unavailable: ${removedWhiskies.length} ===`);
     } catch (error) {
       this.logger.error(`Scraper error: ${error.message}`);
-      return [];
     } finally {
       await page.close();
       await context.close();
@@ -541,40 +448,16 @@ export class ScraperService {
     }
   }
 
-  /**
-   * Get distillery name by code from database
-   */
-  private async getDistilleryNameByCode(distilleryId: string | number): Promise<string | null> {
-    try {
-      const query = `SELECT distillery_name FROM smws_distilleries WHERE smws_id = $1`;
-      const result = await this.postgresService.query(query, [distilleryId.toString()]);
-      return result?.[0]?.distillery_name || null;
-    } catch (error) {
-      this.logger.error(`Error fetching distillery name for code ${distilleryId}:`, error);
-      return null;
-    }
-  }
-
-  /**
-   * Get existing whiskies from database
-   */
   private async getExistingWhiskiesFromDB(): Promise<ScrapedWhiskyListItem[]> {
     try {
-      const query = `SELECT name, url FROM smws_live`;
-      const result = await this.postgresService.query(query);
-      return result.map(row => ({
-        title: row.name,
-        href: row.url || '',
-      }));
+      const rows = await this.liveRepo.find({ select: { name: true, url: true } });
+      return rows.map(r => ({ title: r.name, href: r.url ?? '' }));
     } catch (error) {
       this.logger.error('Error fetching existing whiskies:', error);
       return [];
     }
   }
 
-  /**
-   * Find new whiskies (not in database)
-   */
   private findNewWhiskies(
     scrapedWhiskies: ScrapedWhiskyListItem[],
     existingWhiskies: ScrapedWhiskyListItem[],
@@ -583,9 +466,6 @@ export class ScraperService {
     return scrapedWhiskies.filter(w => !existingTitles.has(w.title));
   }
 
-  /**
-   * Find removed whiskies (in database but not on website)
-   */
   private findRemovedWhiskies(
     scrapedWhiskies: ScrapedWhiskyListItem[],
     existingWhiskies: ScrapedWhiskyListItem[],
@@ -594,133 +474,110 @@ export class ScraperService {
     return existingWhiskies.filter(w => !scrapedTitles.has(w.title));
   }
 
-  /**
-   * Mark whiskies as unavailable
-   */
   private async markWhiskiesAsUnavailable(whiskies: ScrapedWhiskyListItem[]): Promise<void> {
     this.logger.log(`Marking ${whiskies.length} whiskies as unavailable`);
-    
-    for (const whisky of whiskies) {
-      try {
-        const query = `UPDATE smws_live SET available = false, updated_at = CURRENT_TIMESTAMP WHERE name = $1`;
-        await this.postgresService.query(query, [whisky.title]);
-      } catch (error) {
-        this.logger.error(`Error marking whisky as unavailable: ${whisky.title}`, error);
-      }
-    }
+    const names = whiskies.map(w => w.title);
+    await this.liveRepo
+      .createQueryBuilder()
+      .update()
+      .set({ available: false })
+      .where('name IN (:...names)', { names })
+      .execute();
   }
 
-  /**
-   * Mark existing whiskies as available
-   */
   private async markWhiskiesAsAvailable(whiskies: ScrapedWhiskyListItem[]): Promise<void> {
     this.logger.log(`Ensuring ${whiskies.length} whiskies are marked as available`);
-    
-    for (const whisky of whiskies) {
-      try {
-        const query = `UPDATE smws_live SET available = true, updated_at = CURRENT_TIMESTAMP WHERE name = $1`;
-        await this.postgresService.query(query, [whisky.title]);
-      } catch (error) {
-        this.logger.error(`Error marking whisky as available: ${whisky.title}`, error);
-      }
-    }
+    const names = whiskies.map(w => w.title);
+    await this.liveRepo
+      .createQueryBuilder()
+      .update()
+      .set({ available: true })
+      .where('name IN (:...names)', { names })
+      .execute();
   }
 
-  /**
-   * Update isNew flag based on 3-day rule
-   */
   private async updateIsNewFlags(): Promise<void> {
     this.logger.log('Updating isNew flags based on 3-day rule...');
-    
     try {
-      // Untick isNew for whiskies older than 3 days
-      const query = `
-        UPDATE smws_live 
-        SET is_new = false, updated_at = CURRENT_TIMESTAMP
-        WHERE is_new = true 
-        AND new_since IS NOT NULL 
-        AND new_since < NOW() - INTERVAL '3 days'
-      `;
-      
-      await this.postgresService.query(query);
+      await this.liveRepo
+        .createQueryBuilder()
+        .update()
+        .set({ isNew: false })
+        .where("is_new = true AND new_since IS NOT NULL AND new_since < NOW() - INTERVAL '3 days'")
+        .execute();
       this.logger.log('Updated isNew flags successfully');
     } catch (error) {
       this.logger.error('Error updating isNew flags:', error);
     }
   }
 
-  /**
-   * Save whiskies to database
-   */
-  async saveWhiskiesToDatabase(whiskies: ScrapedWhiskyData[], isNew: boolean = false): Promise<number> {
+  async saveWhiskiesToDatabase(whiskies: ScrapedWhiskyData[], isNew: boolean = false): Promise<SmwsLive[]> {
     this.logger.log(`Saving ${whiskies.length} whiskies to database...`);
-    let savedCount = 0;
+
+    // Batch-fetch all needed distillery names in a single query
+    const missingIds = [
+      ...new Set(
+        whiskies
+          .filter(w => w.distilleryId && !w.distillery)
+          .map(w => w.distilleryId!.toString()),
+      ),
+    ];
+
+    const distilleryMap = new Map<string, string>();
+    if (missingIds.length > 0) {
+      const rows = await this.distilleryRepo.findBy({ smwsId: In(missingIds) });
+      for (const row of rows) {
+        distilleryMap.set(row.smwsId, row.distilleryName);
+      }
+    }
+
+    const saved: SmwsLive[] = [];
 
     for (const whisky of whiskies) {
       try {
-        // Get distillery name if we have a distillery code
         if (whisky.distilleryId && !whisky.distillery) {
-          whisky.distillery = await this.getDistilleryNameByCode(whisky.distilleryId) || '';
+          whisky.distillery = distilleryMap.get(whisky.distilleryId.toString()) || '';
         }
 
-        const query = `
-          INSERT INTO smws_live 
-            (name, fullCode, distillery_code, cask_no, price, abv, age, cask_type, profile, distillery, region, available, url, is_new, new_since)
-          VALUES 
-            ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-          ON CONFLICT (fullCode) 
-          DO UPDATE SET 
-            name = EXCLUDED.name,
-            price = EXCLUDED.price,
-            abv = EXCLUDED.abv,
-            age = EXCLUDED.age,
-            cask_type = EXCLUDED.cask_type,
-            profile = EXCLUDED.profile,
-            distillery = EXCLUDED.distillery,
-            region = EXCLUDED.region,
-            available = EXCLUDED.available,
-            url = EXCLUDED.url,
-            updated_at = CURRENT_TIMESTAMP
-        `;
-
-        await this.postgresService.query(query, [
-          whisky.name,
-          whisky.fullCode,
-          whisky.distilleryId?.toString() || null,
-          whisky.caskNo || null,
-          whisky.price,
-          whisky.abv,
-          whisky.age,
-          whisky.caskType,
-          whisky.profile,
-          whisky.distillery,
-          whisky.region,
-          whisky.available,
-          whisky.url,
+        const entity: Partial<SmwsLive> = {
+          name: whisky.name,
+          fullCode: whisky.fullCode,
+          distilleryCode: whisky.distilleryId?.toString() || null,
+          caskNo: whisky.caskNo || null,
+          price: whisky.price || null,
+          abv: whisky.abv || null,
+          age: whisky.age || null,
+          caskType: whisky.caskType || null,
+          profile: whisky.profile || null,
+          distillery: whisky.distillery || null,
+          region: whisky.region || null,
+          available: whisky.available,
+          url: whisky.url || null,
           isNew,
-          isNew ? new Date() : null,
-        ]);
+          newSince: isNew ? new Date() : null,
+        };
 
-        savedCount++;
+        await this.liveRepo.upsert(entity, {
+          conflictPaths: ['fullCode'],
+          skipUpdateIfNoValuesChanged: false,
+        });
+
+        // Fetch the saved entity to return it with full data for alert checking
+        const savedEntity = await this.liveRepo.findOne({ where: { fullCode: whisky.fullCode } });
+        if (savedEntity) saved.push(savedEntity);
       } catch (error) {
         this.logger.error(`Error saving whisky ${whisky.name} (${whisky.fullCode}): ${error.message}`);
       }
     }
 
-    this.logger.log(`Successfully saved ${savedCount}/${whiskies.length} whiskies to database`);
-    return savedCount;
+    this.logger.log(`Saved ${saved.length}/${whiskies.length} whiskies`);
+    return saved;
   }
 
-  /**
-   * Utility: Wait for a specific time
-   */
   private delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  /**
-   * Utility: Take screenshot (useful for debugging)
-   */
   async takeScreenshot(url: string, filename: string): Promise<void> {
     const browser = await this.initBrowser();
     const context = await browser.newContext({ ignoreHTTPSErrors: true });
@@ -736,84 +593,11 @@ export class ScraperService {
       await this.closeBrowser();
     }
   }
+
   // ============================================
-  // ARCHIVE SCRAPER METHODS
+  // ARCHIVE SCRAPER
   // ============================================
 
-  /**
-   * Collect all archive whisky basic info from all pages
-   */
-  private async collectAllArchiveWhiskyBasicInfo(page: Page, startFromPage1: boolean = true): Promise<ScrapedWhiskyListItem[]> {
-    this.logger.log('Collecting archive whisky list from all pages...');
-    const allWhiskies: ScrapedWhiskyListItem[] = [];
-    let currentPage = 1;
-    let hasMorePages = true;
-
-    while (hasMorePages) {
-      this.logger.log(`Scraping archive page ${currentPage}...`);
-      
-      try {
-        if (currentPage > 1 || !startFromPage1) {
-          const pageUrl = `https://smws.eu/archive?page=${currentPage}`;
-          await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
-        }
-        
-        await page.waitForSelector('#product-listing-container', { timeout: 15000 });
-        await this.delay(2000);
-
-        let pageWhiskies = await page.evaluate(() => {
-          const container = document.querySelector('#product-listing-container');
-          if (!container) return [];
-
-          const cards = container.querySelectorAll('.card-title a');
-          return Array.from(cards).map(card => ({
-            title: card.textContent?.trim() || '',
-            href: card.getAttribute('href') || '',
-          }));
-        });
-
-        // Failsafe: sometimes pagination briefly shows an empty listing before products render
-        if (pageWhiskies.length === 0) {
-          this.logger.warn(
-            `Archive page ${currentPage} returned 0 products. Waiting ${this.emptyPageRetryDelayMs / 1000}s and retrying before stopping.`,
-          );
-          await this.delay(this.emptyPageRetryDelayMs);
-
-          pageWhiskies = await page.evaluate(() => {
-            const container = document.querySelector('#product-listing-container');
-            if (!container) return [];
-
-            const cards = container.querySelectorAll('.card-title a');
-            return Array.from(cards).map(card => ({
-              title: card.textContent?.trim() || '',
-              href: card.getAttribute('href') || '',
-            }));
-          });
-        }
-
-        if (pageWhiskies.length === 0) {
-          this.logger.log(`No products found on archive page ${currentPage}. Reached end.`);
-          hasMorePages = false;
-        } else {
-          this.logger.log(`Found ${pageWhiskies.length} archive whiskies on page ${currentPage}`);
-          allWhiskies.push(...pageWhiskies);
-          currentPage++;
-        }
-      } catch (error) {
-        this.logger.error(`Error on archive page ${currentPage}: ${error.message}`);
-        hasMorePages = false;
-      }
-    }
-
-    this.logger.log(`=== ARCHIVE LISTING COMPLETE ===`);
-    this.logger.log(`Total archive pages scraped: ${currentPage - 1}`);
-    this.logger.log(`Total archive whiskies found: ${allWhiskies.length}`);
-    return allWhiskies;
-  }
-
-  /**
-   * Scrape detailed information from individual archive whisky pages
-   */
   private async scrapeArchiveWhiskyDetails(page: Page, whiskies: ScrapedWhiskyListItem[]): Promise<ScrapedArchiveWhiskyData[]> {
     this.logger.log(`Starting archive detail scraping for ${whiskies.length} whiskies`);
     const detailedWhiskies: ScrapedArchiveWhiskyData[] = [];
@@ -822,7 +606,6 @@ export class ScraperService {
     for (let i = 0; i < whiskies.length; i++) {
       const whisky = whiskies[i];
       const url = whisky.href.startsWith('http') ? whisky.href : `${baseUrl}${whisky.href}`;
-
       this.logger.log(`[${i + 1}/${whiskies.length}] Scraping archive: ${whisky.title}`);
 
       try {
@@ -831,7 +614,7 @@ export class ScraperService {
         await this.delay(500);
 
         const details = await page.evaluate(() => {
-          const getText = (selector: string) => 
+          const getText = (selector: string) =>
             document.querySelector(selector)?.textContent?.trim() || '';
 
           const getInfoValue = (infoName: string) => {
@@ -845,21 +628,17 @@ export class ScraperService {
             return '';
           };
 
-          // Extract price from BCData script tag
           const getPrice = () => {
             const scripts = document.querySelectorAll('script[type="text/javascript"]');
             for (const script of scripts) {
               const content = script.textContent || '';
               if (content.includes('var BCData')) {
                 try {
-                  // Extract the BCData JSON
                   const match = content.match(/var BCData = ({.*?});/s);
                   if (match) {
                     const bcData = JSON.parse(match[1]);
                     const priceData = bcData?.product_attributes?.price?.with_tax;
-                    if (priceData?.formatted) {
-                      return priceData.formatted;
-                    }
+                    if (priceData?.formatted) return priceData.formatted;
                   }
                 } catch (e) {
                   console.error('Error parsing BCData:', e);
@@ -870,14 +649,13 @@ export class ScraperService {
           };
 
           let code = getText('.caskNo') || getText('.productView-title');
-          // Remove "CASK NO. " prefix if present
           if (code.startsWith('CASK NO. ')) {
             code = code.replace('CASK NO. ', '');
           }
 
           return {
             name: getText('.productView-title'),
-            code: code,
+            code,
             price: getPrice(),
             description: getText('.productView-description') || getText('.productView-info-value'),
             abv: getInfoValue('ABV'),
@@ -887,11 +665,10 @@ export class ScraperService {
             bottleSize: getInfoValue('BOTTLE SIZE') || '700ml',
             distillery: '',
             url: window.location.href,
-            is_new: true,
           };
         });
 
-        if (details && details.name) {
+        if (details?.name) {
           detailedWhiskies.push(details as ScrapedArchiveWhiskyData);
         }
       } catch (error) {
@@ -899,88 +676,56 @@ export class ScraperService {
       }
     }
 
-    this.logger.log(`=== ARCHIVE DETAIL SCRAPING COMPLETE ===`);
-    this.logger.log(`Successfully scraped: ${detailedWhiskies.length}/${whiskies.length}`);
+    this.logger.log(`Archive detail scraping complete — ${detailedWhiskies.length}/${whiskies.length} succeeded`);
     return detailedWhiskies;
   }
 
-  /**
-   * Get existing archive whiskies from database
-   */
   private async getExistingArchiveWhiskiesFromDB(): Promise<ScrapedWhiskyListItem[]> {
     try {
-      const query = `SELECT name, url FROM smws_archive`;
-      const result = await this.postgresService.query(query);
-      return result.map(row => ({
-        title: row.name,
-        href: row.url || '',
-      }));
+      const rows = await this.archiveRepo.find({ select: { name: true, url: true } });
+      return rows.map(r => ({ title: r.name, href: r.url ?? '' }));
     } catch (error) {
       this.logger.error('Error fetching existing archive whiskies:', error);
       return [];
     }
   }
 
-  /**
-   * Save archive whiskies to database
-   */
   async saveArchiveWhiskiesToDatabase(whiskies: ScrapedArchiveWhiskyData[], isNew: boolean = false): Promise<number> {
     this.logger.log(`Saving ${whiskies.length} archive whiskies to database...`);
     let savedCount = 0;
 
     for (const whisky of whiskies) {
       try {
-        const query = `
-          INSERT INTO smws_archive 
-            (name, code, price, description, abv, age, cask_type, distillery, region, bottle_size, url, is_new)
-          VALUES 
-            ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-          ON CONFLICT (code) 
-          DO UPDATE SET 
-            name = EXCLUDED.name,
-            price = EXCLUDED.price,
-            description = EXCLUDED.description,
-            abv = EXCLUDED.abv,
-            age = EXCLUDED.age,
-            cask_type = EXCLUDED.cask_type,
-            distillery = EXCLUDED.distillery,
-            region = EXCLUDED.region,
-            bottle_size = EXCLUDED.bottle_size,
-            url = EXCLUDED.url,
-            updated_at = CURRENT_TIMESTAMP
-        `;
-
-        await this.postgresService.query(query, [
-          whisky.name,
-          whisky.code,
-          whisky.price,
-          whisky.description,
-          whisky.abv,
-          whisky.age,
-          whisky.caskType,
-          whisky.distillery,
-          whisky.region,
-          whisky.bottleSize,
-          whisky.url,
-          isNew,
-        ]);
-
+        await this.archiveRepo.upsert(
+          {
+            name: whisky.name,
+            code: whisky.code,
+            price: whisky.price || null,
+            description: whisky.description || null,
+            abv: whisky.abv || null,
+            age: whisky.age || null,
+            caskType: whisky.caskType || null,
+            distillery: whisky.distillery || null,
+            region: whisky.region || null,
+            bottleSize: whisky.bottleSize || null,
+            url: whisky.url || null,
+            isNew,
+          },
+          { conflictPaths: ['code'], skipUpdateIfNoValuesChanged: false },
+        );
         savedCount++;
       } catch (error) {
         this.logger.error(`Error saving archive whisky ${whisky.name} (${whisky.code}): ${error.message}`);
       }
     }
 
-    this.logger.log(`Successfully saved ${savedCount}/${whiskies.length} archive whiskies to database`);
+    this.logger.log(`Saved ${savedCount}/${whiskies.length} archive whiskies`);
     return savedCount;
   }
 
-  /**
-   * Main archive scraper runner
-   */
-  async runArchiveScraper(): Promise<ScrapedArchiveWhiskyData[]> {
+  async runArchiveScraper(): Promise<void> {
     this.logger.log("=== STARTING SMWS ARCHIVE SCRAPER ===");
-    
+
     const browser = await this.initBrowser();
     const context = await browser.newContext({
       ignoreHTTPSErrors: true,
@@ -989,46 +734,35 @@ export class ScraperService {
     const page = await context.newPage();
 
     try {
-      // Step 1: Navigate and handle modals
       this.logger.log('Step 1: Navigating to SMWS Archive...');
       await page.goto('https://smws.eu/archive', { waitUntil: 'domcontentloaded', timeout: 45000 });
       await this.handleModals(page);
 
-      // Step 2: Collect all archive whisky basic info from all pages
       this.logger.log('Step 2: Collecting archive whisky list...');
-      const allWhiskies = await this.collectAllArchiveWhiskyBasicInfo(page, true);
+      const allWhiskies = await this.collectAllArchiveWhiskyBasicInfo(page);
 
-      // Step 3: Get existing archive whiskies from database
       this.logger.log('Step 3: Fetching existing archive whiskies from database...');
       const existingWhiskies = await this.getExistingArchiveWhiskiesFromDB();
-      this.logger.log(`Found ${existingWhiskies.length} existing archive whiskies in database`);
+      this.logger.log(`Found ${existingWhiskies.length} existing archive whiskies`);
 
-      // Step 4: Compare and find differences
       this.logger.log('Step 4: Comparing with database...');
       const newWhiskies = this.findNewWhiskies(allWhiskies, existingWhiskies);
-      
       this.logger.log(`New archive whiskies: ${newWhiskies.length}`);
 
-      // Step 5: Scrape details only for NEW archive whiskies
       let savedCount = 0;
       if (newWhiskies.length > 0) {
         this.logger.log(`Step 5: Scraping details for ${newWhiskies.length} new archive whiskies...`);
         const detailedWhiskies = await this.scrapeArchiveWhiskyDetails(page, newWhiskies);
-        
+
         this.logger.log('Step 6: Saving new archive whiskies to database...');
         savedCount = await this.saveArchiveWhiskiesToDatabase(detailedWhiskies, true);
       } else {
         this.logger.log('Step 5: No new archive whiskies to scrape');
       }
 
-      this.logger.log(`=== ARCHIVE SCRAPER COMPLETED ===`);
-      this.logger.log(`Total new archive whiskies found: ${newWhiskies.length}`);
-      this.logger.log(`Total archive whiskies saved: ${savedCount}`);
-      
-      return [];
+      this.logger.log(`=== ARCHIVE SCRAPER COMPLETED — new: ${newWhiskies.length}, saved: ${savedCount} ===`);
     } catch (error) {
       this.logger.error(`Archive scraper error: ${error.message}`);
-      return [];
     } finally {
       await page.close();
       await context.close();
