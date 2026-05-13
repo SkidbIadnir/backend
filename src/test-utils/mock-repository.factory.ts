@@ -1,8 +1,8 @@
 import { Repository } from 'typeorm';
 
-export type MockRepository<T = any> = Partial<Record<keyof Repository<T>, jest.Mock>>;
+export type MockRepository<T extends object = any> = Partial<Record<keyof Repository<T>, jest.Mock>>;
 
-export const createMockRepository = <T = any>(): MockRepository<T> => ({
+export const createMockRepository = <T extends object = any>(): MockRepository<T> => ({
   find: jest.fn(),
   findOne: jest.fn(),
   findBy: jest.fn(),

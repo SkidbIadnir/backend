@@ -205,22 +205,17 @@ export class ScraperService {
             return '';
           };
 
-          let fullCode = getText('.caskNo');
-          if (fullCode.startsWith('CASK NO. ')) {
-            fullCode = fullCode.replace('CASK NO. ', '');
-          }
+          // Scope to .productView-details to avoid picking up codes from the
+          // "You might also like" cards rendered further down the page.
+          // If no valid code is found this is not a regular bottling — return null to skip it.
+          const rawCode = document.querySelector('.productView-details .caskNo')?.textContent || '';
+          const codeMatch = rawCode.match(/([A-Za-z]*\d+)\.(\d+)/);
+          if (!codeMatch) return null;
 
-          let distilleryId: number | string | null = null;
-          let caskNo: string | null = null;
-
-          if (fullCode) {
-            const match = fullCode.match(/([A-Za-z]?\d+|[A-Za-z]+\d+)\.(\d+)/);
-            if (match) {
-              const code = match[1];
-              caskNo = match[2];
-              distilleryId = /^\d+$/.test(code) ? parseInt(code, 10) : code;
-            }
-          }
+          const fullCode = codeMatch[0];
+          const codePart = codeMatch[1];
+          const caskNo = codeMatch[2];
+          const distilleryId = /^\d+$/.test(codePart) ? parseInt(codePart, 10) : codePart;
 
           return {
             name: getText('.productView-title'),
@@ -239,7 +234,9 @@ export class ScraperService {
           };
         });
 
-        if (details?.name) {
+        if (details === null) {
+          this.logger.log(`Skipping "${whisky.title}" — no valid SMWS code found (not a regular bottling)`);
+        } else if (details.name) {
           detailedWhiskies.push(details as ScrapedWhiskyData);
         }
       } catch (error) {
@@ -247,7 +244,7 @@ export class ScraperService {
       }
     }
 
-    this.logger.log(`Detail scraping complete — ${detailedWhiskies.length}/${whiskies.length} succeeded`);
+    this.logger.log(`Detail scraping complete — ${detailedWhiskies.length}/${whiskies.length} were regular bottlings`);
     return detailedWhiskies;
   }
 
@@ -648,10 +645,11 @@ export class ScraperService {
             return '';
           };
 
-          let code = getText('.caskNo') || getText('.productView-title');
-          if (code.startsWith('CASK NO. ')) {
-            code = code.replace('CASK NO. ', '');
-          }
+          const rawArchiveCode = document.querySelector('.productView-details .caskNo')?.textContent || '';
+          const archiveCodeMatch = rawArchiveCode.match(/([A-Za-z]*\d+)\.(\d+)/);
+          if (!archiveCodeMatch) return null;
+
+          const code = archiveCodeMatch[0];
 
           return {
             name: getText('.productView-title'),
@@ -668,7 +666,9 @@ export class ScraperService {
           };
         });
 
-        if (details?.name) {
+        if (details === null) {
+          this.logger.log(`Skipping archive "${whisky.title}" — no valid SMWS code found (not a regular bottling)`);
+        } else if (details.name) {
           detailedWhiskies.push(details as ScrapedArchiveWhiskyData);
         }
       } catch (error) {

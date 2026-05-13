@@ -67,4 +67,28 @@ export class PostgresService {
       message: 'Distilleries data checked',
     };
   }
+
+  /**
+   * Removes rows whose code doesn't match a valid SMWS bottling pattern (e.g. "59.84", "G4.59").
+   * Catches blends, bundles, offers and dirty "CASK NO. ..." values left by the old scraper.
+   */
+  async cleanInvalidEntries(): Promise<{ deletedLive: number; deletedArchive: number }> {
+    // Valid pattern: optional letters, then digits, a dot, then digits — e.g. "59.84", "G4.59", "B1.123"
+    const pattern = `^[A-Za-z]*[0-9]+\\.[0-9]+$`;
+
+    const liveResult = await this.dataSource.query(
+      `DELETE FROM smws_live WHERE fullcode !~ $1`,
+      [pattern],
+    );
+    const archiveResult = await this.dataSource.query(
+      `DELETE FROM smws_archive WHERE code !~ $1`,
+      [pattern],
+    );
+
+    const deletedLive: number = liveResult[1] ?? 0;
+    const deletedArchive: number = archiveResult[1] ?? 0;
+
+    this.logger.log(`Cleaned invalid entries — smws_live: ${deletedLive}, smws_archive: ${deletedArchive}`);
+    return { deletedLive, deletedArchive };
+  }
 }

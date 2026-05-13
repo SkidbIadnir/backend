@@ -16,4 +16,10 @@ export class PostgresController {
     const result = await this.postgresService.purgeTables();
     return result;
   }
+
+  @Delete('entries/invalid')
+  async cleanInvalidEntries() {
+    const result = await this.postgresService.cleanInvalidEntries();
+    return result;
+  }
 }
