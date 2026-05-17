@@ -13,6 +13,8 @@ import { SmwsArchive } from './entities/smws-archive.entity';
 import { SmwsLookout } from './entities/smws-lookout.entity';
 import { SmwsDistillery } from './entities/smws-distillery.entity';
 import { UserAlert } from './entities/user-alert.entity';
+import { User } from './users/user.entity';
+import { AuthModule } from './auth/auth.module';
 
 config();
 
@@ -25,7 +27,7 @@ config();
       database: process.env.POSTGRES_DB || 'postgres',
       username: process.env.POSTGRES_USER || 'postgres',
       password: process.env.POSTGRES_PASSWORD || 'postgres',
-      entities: [SmwsLive, SmwsArchive, SmwsLookout, SmwsDistillery, UserAlert],
+      entities: [SmwsLive, SmwsArchive, SmwsLookout, SmwsDistillery, UserAlert, User],
       synchronize: process.env.NODE_ENV !== 'production',
       logging: process.env.NODE_ENV !== 'production',
     }),
@@ -34,6 +36,7 @@ config();
     PostgresModule,
     ScheduleModule.forRoot(),
     ScraperModule,
+    AuthModule,
   ],
   controllers: [AppController],
   providers: [AppService],
