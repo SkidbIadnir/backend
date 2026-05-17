@@ -1,10 +1,9 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
-import { UserAlert } from '../entities/user-alert.entity';
+import { AlertsModule } from '../alerts/alerts.module';
 import { DiscordService } from './discord.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([UserAlert])],
+  imports: [AlertsModule],
   providers: [DiscordService],
   exports: [DiscordService],
 })

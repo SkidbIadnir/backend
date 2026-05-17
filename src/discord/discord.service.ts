@@ -1,6 +1,4 @@
-import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { ConflictException, Injectable, NotFoundException, OnModuleInit, Logger } from '@nestjs/common';
 import {
   Client,
   GatewayIntentBits,
@@ -13,6 +11,7 @@ import {
   EmbedBuilder,
   MessageFlags,
 } from 'discord.js';
+import { AlertsService } from '../alerts/alerts.service';
 import { UserAlert } from '../entities/user-alert.entity';
 
 export type { UserAlert };
@@ -22,10 +21,7 @@ export class DiscordService implements OnModuleInit {
   private client: Client;
   private readonly logger = new Logger(DiscordService.name);
 
-  constructor(
-    @InjectRepository(UserAlert)
-    private readonly alertRepo: Repository<UserAlert>,
-  ) {
+  constructor(private readonly alertsService: AlertsService) {
     this.client = new Client({
       intents: [
         GatewayIntentBits.Guilds,
@@ -134,40 +130,23 @@ export class DiscordService implements OnModuleInit {
 
   private async handleAlertAdd(interaction: ChatInputCommandInteraction): Promise<void> {
     const alertType = interaction.options.getString('type', true);
-    let alertValue = interaction.options.getString('value', true);
+    const rawValue = interaction.options.getString('value', true);
 
-    if (alertType === 'age') {
-      const ageNum = parseInt(alertValue);
-      if (isNaN(ageNum) || ageNum < 0) {
-        await interaction.reply({ content: '❌ Age must be a positive number.', flags: MessageFlags.Ephemeral });
-        return;
-      }
-      alertValue = ageNum.toString();
-    } else {
-      alertValue = alertValue.toLowerCase().replace(/\b\w/g, l => l.toUpperCase());
+    let alertValue: string;
+    try {
+      alertValue = this.alertsService.normalizeValue(alertType, rawValue);
+    } catch {
+      await interaction.reply({ content: '❌ Age must be a positive number.', flags: MessageFlags.Ephemeral });
+      return;
     }
 
     try {
-      const existing = await this.alertRepo.findOne({
-        where: {
-          userId: interaction.user.id,
-          guildId: interaction.guildId!,
-          alertType,
-          alertValue,
-        },
-      });
-
-      if (existing) {
-        await interaction.reply({ content: '⚠️ You already have this alert registered.', flags: MessageFlags.Ephemeral });
-        return;
-      }
-
-      const saved = await this.alertRepo.save({
-        userId: interaction.user.id,
-        guildId: interaction.guildId!,
+      const saved = await this.alertsService.create(
+        interaction.user.id,
         alertType,
-        alertValue,
-      });
+        rawValue,
+        interaction.guildId ?? undefined,
+      );
 
       const typeLabel = alertType === 'age'
         ? `Age over ${alertValue} years`
@@ -177,7 +156,11 @@ export class DiscordService implements OnModuleInit {
         content: `✅ Alert added successfully!\n**Type:** ${typeLabel}\n**ID:** ${saved.id}`,
         flags: MessageFlags.Ephemeral,
       });
-    } catch (error) {
+    } catch (error: any) {
+      if (error instanceof ConflictException) {
+        await interaction.reply({ content: '⚠️ You already have this alert registered.', flags: MessageFlags.Ephemeral });
+        return;
+      }
       this.logger.error('Error adding alert:', error);
       await interaction.reply({ content: '❌ Failed to add alert. Please try again.', flags: MessageFlags.Ephemeral });
     }
@@ -185,10 +168,7 @@ export class DiscordService implements OnModuleInit {
 
   private async handleAlertList(interaction: ChatInputCommandInteraction): Promise<void> {
     try {
-      const alerts = await this.alertRepo.find({
-        where: { userId: interaction.user.id, guildId: interaction.guildId! },
-        order: { createdAt: 'DESC' },
-      });
+      const alerts = await this.alertsService.findByUser(interaction.user.id);
 
       if (alerts.length === 0) {
         await interaction.reply({ content: '📭 You don\'t have any active alerts.', flags: MessageFlags.Ephemeral });
@@ -219,22 +199,16 @@ export class DiscordService implements OnModuleInit {
     const alertId = interaction.options.getInteger('id', true);
 
     try {
-      const result = await this.alertRepo.delete({
-        id: alertId,
-        userId: interaction.user.id,
-        guildId: interaction.guildId!,
-      });
-
-      if (!result.affected) {
+      await this.alertsService.remove(alertId, interaction.user.id);
+      await interaction.reply({ content: `✅ Alert #${alertId} removed successfully!`, flags: MessageFlags.Ephemeral });
+    } catch (error: any) {
+      if (error instanceof NotFoundException) {
         await interaction.reply({
           content: '❌ Alert not found or you don\'t have permission to remove it.',
           flags: MessageFlags.Ephemeral,
         });
         return;
       }
-
-      await interaction.reply({ content: `✅ Alert #${alertId} removed successfully!`, flags: MessageFlags.Ephemeral });
-    } catch (error) {
       this.logger.error('Error removing alert:', error);
       await interaction.reply({ content: '❌ Failed to remove alert. Please try again.', flags: MessageFlags.Ephemeral });
     }
@@ -242,7 +216,7 @@ export class DiscordService implements OnModuleInit {
 
   async sendAlertNotification(
     userId: string,
-    guildId: string,
+    guildId: string | null,
     whiskyData: {
       name: string;
       distillery?: string;
@@ -256,14 +230,6 @@ export class DiscordService implements OnModuleInit {
     matchedAlertValue: string,
   ): Promise<void> {
     try {
-      const guild = await this.client.guilds.fetch(guildId);
-      const member = await guild.members.fetch(userId);
-
-      if (!member) {
-        this.logger.warn(`User ${userId} not found in guild ${guildId}`);
-        return;
-      }
-
       const embed = new EmbedBuilder()
         .setTitle('🎉 Whisky Alert Match!')
         .setColor(0x00ff00)
@@ -280,7 +246,19 @@ export class DiscordService implements OnModuleInit {
         .setFooter({ text: `Matched your ${matchedAlertType} alert: ${matchedAlertValue}` })
         .setTimestamp();
 
-      await member.send({ embeds: [embed] });
+      if (guildId) {
+        const guild = await this.client.guilds.fetch(guildId);
+        const member = await guild.members.fetch(userId);
+        if (!member) {
+          this.logger.warn(`User ${userId} not found in guild ${guildId}`);
+          return;
+        }
+        await member.send({ embeds: [embed] });
+      } else {
+        const user = await this.client.users.fetch(userId);
+        await user.send({ embeds: [embed] });
+      }
+
       this.logger.log(`Alert notification sent to user ${userId} for whisky ${whiskyData.name}`);
     } catch (error) {
       this.logger.error(`Failed to send alert notification to user ${userId}:`, error);
@@ -288,11 +266,6 @@ export class DiscordService implements OnModuleInit {
   }
 
   async getAllAlerts(): Promise<UserAlert[]> {
-    try {
-      return await this.alertRepo.find();
-    } catch (error) {
-      this.logger.error('Error fetching alerts:', error);
-      return [];
-    }
+    return this.alertsService.getAll();
   }
 }

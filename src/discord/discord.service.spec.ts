@@ -5,6 +5,7 @@ let mockClientInstance: {
   user: { id: string; tag: string; setActivity: jest.Mock };
   guilds: { fetch: jest.Mock };
   channels: { fetch: jest.Mock };
+  users: { fetch: jest.Mock };
 };
 
 jest.mock('discord.js', () => {
@@ -15,6 +16,7 @@ jest.mock('discord.js', () => {
     user: { id: 'bot-id', tag: 'Bot#0000', setActivity: jest.fn() },
     guilds: { fetch: jest.fn() },
     channels: { fetch: jest.fn() },
+    users: { fetch: jest.fn() },
   };
 
   const actual = jest.requireActual('discord.js');
@@ -29,25 +31,49 @@ jest.mock('discord.js', () => {
   };
 });
 
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { getRepositoryToken } from '@nestjs/typeorm';
 import { DiscordService } from './discord.service';
-import { UserAlert } from '../entities/user-alert.entity';
-import { createMockRepository, MockRepository } from '../test-utils/mock-repository.factory';
+import { AlertsService } from '../alerts/alerts.service';
 import { makeUserAlert } from '../test-utils/fixtures';
 import { makeMockInteraction } from '../test-utils/mock-interaction.factory';
 
+type MockAlertsService = {
+  normalizeValue: jest.Mock;
+  findByUser: jest.Mock;
+  create: jest.Mock;
+  remove: jest.Mock;
+  getAll: jest.Mock;
+};
+
+function createMockAlertsService(): MockAlertsService {
+  return {
+    normalizeValue: jest.fn((type: string, val: string) => {
+      if (type === 'age') {
+        const n = parseInt(val);
+        if (isNaN(n) || n < 0) throw new Error('Age must be a positive number.');
+        return n.toString();
+      }
+      return val.toLowerCase().replace(/\b\w/g, (l: string) => l.toUpperCase());
+    }),
+    findByUser: jest.fn(),
+    create: jest.fn(),
+    remove: jest.fn(),
+    getAll: jest.fn(),
+  };
+}
+
 describe('DiscordService', () => {
   let service: DiscordService;
-  let alertRepo: MockRepository<UserAlert>;
+  let alertsService: MockAlertsService;
 
   beforeEach(async () => {
-    alertRepo = createMockRepository<UserAlert>();
+    alertsService = createMockAlertsService();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         DiscordService,
-        { provide: getRepositoryToken(UserAlert), useValue: alertRepo },
+        { provide: AlertsService, useValue: alertsService },
       ],
     }).compile();
 
@@ -62,84 +88,83 @@ describe('DiscordService', () => {
   // ─── handleAlertAdd ──────────────────────────────────────────────────────────
 
   describe('handleAlertAdd', () => {
-    it('saves a valid age alert and replies with success', async () => {
+    it('creates a valid age alert and replies with success', async () => {
       const interaction = makeMockInteraction({
         commandName: 'alert-add',
         stringOptions: { type: 'age', value: '15' },
       });
-      alertRepo.findOne!.mockResolvedValue(null);
-      alertRepo.save!.mockResolvedValue(makeUserAlert({ id: 42, alertType: 'age', alertValue: '15' }));
+      alertsService.create.mockResolvedValue(makeUserAlert({ id: 42, alertType: 'age', alertValue: '15' }));
 
       await (service as any).handleAlertAdd(interaction);
 
-      expect(alertRepo.save).toHaveBeenCalledWith(
-        expect.objectContaining({ alertType: 'age', alertValue: '15' }),
+      expect(alertsService.create).toHaveBeenCalledWith(
+        'user-123', 'age', '15', 'guild-456',
       );
       expect(interaction.reply).toHaveBeenCalledWith(
         expect.objectContaining({ content: expect.stringContaining('42') }),
       );
     });
 
-    it('replies with error and does not save for negative age', async () => {
+    it('replies with error and does not create for negative age', async () => {
       const interaction = makeMockInteraction({
         stringOptions: { type: 'age', value: '-1' },
       });
 
       await (service as any).handleAlertAdd(interaction);
 
-      expect(alertRepo.save).not.toHaveBeenCalled();
+      expect(alertsService.create).not.toHaveBeenCalled();
       expect(interaction.reply).toHaveBeenCalledWith(
         expect.objectContaining({ content: expect.stringContaining('positive') }),
       );
     });
 
-    it('replies with error and does not save for non-numeric age', async () => {
+    it('replies with error and does not create for non-numeric age', async () => {
       const interaction = makeMockInteraction({
         stringOptions: { type: 'age', value: 'fifteen' },
       });
 
       await (service as any).handleAlertAdd(interaction);
 
-      expect(alertRepo.save).not.toHaveBeenCalled();
+      expect(alertsService.create).not.toHaveBeenCalled();
       expect(interaction.reply).toHaveBeenCalledWith(
         expect.objectContaining({ content: expect.stringContaining('positive') }),
       );
     });
 
-    it('title-cases non-age alert value before saving', async () => {
+    it('reply label uses title-cased value for non-age alert', async () => {
       const interaction = makeMockInteraction({
         stringOptions: { type: 'region', value: 'speyside' },
       });
-      alertRepo.findOne!.mockResolvedValue(null);
-      alertRepo.save!.mockResolvedValue(makeUserAlert({ alertType: 'region', alertValue: 'Speyside' }));
+      alertsService.create.mockResolvedValue(makeUserAlert({ alertType: 'region', alertValue: 'Speyside' }));
 
       await (service as any).handleAlertAdd(interaction);
 
-      expect(alertRepo.save).toHaveBeenCalledWith(
-        expect.objectContaining({ alertValue: 'Speyside' }),
+      expect(alertsService.create).toHaveBeenCalledWith(
+        'user-123', 'region', 'speyside', 'guild-456',
+      );
+      expect(interaction.reply).toHaveBeenCalledWith(
+        expect.objectContaining({ content: expect.stringContaining('Speyside') }),
       );
     });
 
-    it('replies with duplicate message and does not save when alert exists', async () => {
+    it('replies with duplicate message when create throws ConflictException', async () => {
       const interaction = makeMockInteraction({
         stringOptions: { type: 'distillery', value: 'Glenfarclas' },
       });
-      alertRepo.findOne!.mockResolvedValue(makeUserAlert());
+      alertsService.create.mockRejectedValue(new ConflictException('already have'));
 
       await (service as any).handleAlertAdd(interaction);
 
-      expect(alertRepo.save).not.toHaveBeenCalled();
       expect(interaction.reply).toHaveBeenCalledWith(
         expect.objectContaining({ content: expect.stringContaining('already') }),
       );
     });
 
-    it('replies with failure message when save throws', async () => {
+    it('replies with failure message when create throws a generic error', async () => {
       const interaction = makeMockInteraction({
         stringOptions: { type: 'distillery', value: 'Glenfarclas' },
       });
-      alertRepo.findOne!.mockResolvedValue(null);
-      alertRepo.save!.mockRejectedValue(new Error('DB error'));
+      alertsService.create.mockRejectedValue(new Error('DB error'));
 
       await (service as any).handleAlertAdd(interaction);
 
@@ -153,7 +178,7 @@ describe('DiscordService', () => {
 
   describe('handleAlertList', () => {
     it('replies with no-alerts message when list is empty', async () => {
-      alertRepo.find!.mockResolvedValue([]);
+      alertsService.findByUser.mockResolvedValue([]);
       const interaction = makeMockInteraction({ commandName: 'alert-list' });
 
       await (service as any).handleAlertList(interaction);
@@ -164,7 +189,7 @@ describe('DiscordService', () => {
     });
 
     it('replies with an embed when alerts exist', async () => {
-      alertRepo.find!.mockResolvedValue([makeUserAlert({ id: 7 })]);
+      alertsService.findByUser.mockResolvedValue([makeUserAlert({ id: 7 })]);
       const interaction = makeMockInteraction({ commandName: 'alert-list' });
 
       await (service as any).handleAlertList(interaction);
@@ -175,7 +200,7 @@ describe('DiscordService', () => {
     });
 
     it('formats age alert label as "Age over X years"', async () => {
-      alertRepo.find!.mockResolvedValue([makeUserAlert({ alertType: 'age', alertValue: '12' })]);
+      alertsService.findByUser.mockResolvedValue([makeUserAlert({ alertType: 'age', alertValue: '12' })]);
       const interaction = makeMockInteraction({ commandName: 'alert-list' });
 
       await (service as any).handleAlertList(interaction);
@@ -185,7 +210,7 @@ describe('DiscordService', () => {
     });
 
     it('formats non-age alert label with capitalised type', async () => {
-      alertRepo.find!.mockResolvedValue([makeUserAlert({ alertType: 'region', alertValue: 'Speyside' })]);
+      alertsService.findByUser.mockResolvedValue([makeUserAlert({ alertType: 'region', alertValue: 'Speyside' })]);
       const interaction = makeMockInteraction({ commandName: 'alert-list' });
 
       await (service as any).handleAlertList(interaction);
@@ -194,8 +219,8 @@ describe('DiscordService', () => {
       expect(embed.data.description).toContain('Region: Speyside');
     });
 
-    it('replies with failure message when find throws', async () => {
-      alertRepo.find!.mockRejectedValue(new Error('DB error'));
+    it('replies with failure message when findByUser throws', async () => {
+      alertsService.findByUser.mockRejectedValue(new Error('DB error'));
       const interaction = makeMockInteraction({ commandName: 'alert-list' });
 
       await (service as any).handleAlertList(interaction);
@@ -209,8 +234,8 @@ describe('DiscordService', () => {
   // ─── handleAlertRemove ────────────────────────────────────────────────────────
 
   describe('handleAlertRemove', () => {
-    it('calls delete with correct params and replies with success on affected=1', async () => {
-      alertRepo.delete!.mockResolvedValue({ affected: 1, raw: [] });
+    it('calls remove with correct params and replies with success', async () => {
+      alertsService.remove.mockResolvedValue(undefined);
       const interaction = makeMockInteraction({
         commandName: 'alert-remove',
         integerOptions: { id: 7 },
@@ -218,16 +243,14 @@ describe('DiscordService', () => {
 
       await (service as any).handleAlertRemove(interaction);
 
-      expect(alertRepo.delete).toHaveBeenCalledWith(
-        expect.objectContaining({ id: 7, userId: 'user-123', guildId: 'guild-456' }),
-      );
+      expect(alertsService.remove).toHaveBeenCalledWith(7, 'user-123');
       expect(interaction.reply).toHaveBeenCalledWith(
         expect.objectContaining({ content: expect.stringContaining('7') }),
       );
     });
 
-    it('replies with not-found message when affected=0', async () => {
-      alertRepo.delete!.mockResolvedValue({ affected: 0, raw: [] });
+    it('replies with not-found message when remove throws NotFoundException', async () => {
+      alertsService.remove.mockRejectedValue(new NotFoundException('not found'));
       const interaction = makeMockInteraction({ integerOptions: { id: 99 } });
 
       await (service as any).handleAlertRemove(interaction);
@@ -237,8 +260,8 @@ describe('DiscordService', () => {
       );
     });
 
-    it('replies with failure message when delete throws', async () => {
-      alertRepo.delete!.mockRejectedValue(new Error('DB error'));
+    it('replies with failure message when remove throws a generic error', async () => {
+      alertsService.remove.mockRejectedValue(new Error('DB error'));
       const interaction = makeMockInteraction({ integerOptions: { id: 1 } });
 
       await (service as any).handleAlertRemove(interaction);
@@ -262,7 +285,7 @@ describe('DiscordService', () => {
       url: 'https://smws.eu/product/1.100',
     };
 
-    it('sends a DM embed to the matched guild member', async () => {
+    it('sends a DM embed via guild member when guildId is provided', async () => {
       const mockSend = jest.fn().mockResolvedValue(undefined);
       const mockMember = { send: mockSend };
       const mockGuild = { members: { fetch: jest.fn().mockResolvedValue(mockMember) } };
@@ -275,6 +298,16 @@ describe('DiscordService', () => {
       expect(embed.data.fields?.some((f: any) => f.value === 'The Dram')).toBe(true);
     });
 
+    it('sends a DM directly via users.fetch when guildId is null', async () => {
+      const mockSend = jest.fn().mockResolvedValue(undefined);
+      mockClientInstance.users.fetch.mockResolvedValue({ send: mockSend });
+
+      await service.sendAlertNotification('user-123', null, whiskyData, 'distillery', 'Glenfarclas');
+
+      expect(mockClientInstance.guilds.fetch).not.toHaveBeenCalled();
+      expect(mockSend).toHaveBeenCalledWith(expect.objectContaining({ embeds: expect.any(Array) }));
+    });
+
     it('does not throw when guild.members.fetch throws', async () => {
       const mockGuild = { members: { fetch: jest.fn().mockRejectedValue(new Error('User not in guild')) } };
       mockClientInstance.guilds.fetch.mockResolvedValue(mockGuild);
@@ -284,7 +317,7 @@ describe('DiscordService', () => {
       ).resolves.not.toThrow();
     });
 
-    it('does not call member.send when guild fetch returns falsy', async () => {
+    it('does not throw when guild fetch returns null', async () => {
       mockClientInstance.guilds.fetch.mockResolvedValue(null);
 
       await expect(
@@ -296,15 +329,15 @@ describe('DiscordService', () => {
   // ─── getAllAlerts ─────────────────────────────────────────────────────────────
 
   describe('getAllAlerts', () => {
-    it('returns result of alertRepo.find', async () => {
+    it('returns result of alertsService.getAll', async () => {
       const alerts = [makeUserAlert()];
-      alertRepo.find!.mockResolvedValue(alerts);
+      alertsService.getAll.mockResolvedValue(alerts);
       const result = await service.getAllAlerts();
       expect(result).toEqual(alerts);
     });
 
-    it('returns empty array when alertRepo.find throws', async () => {
-      alertRepo.find!.mockRejectedValue(new Error('DB error'));
+    it('returns empty array when alertsService.getAll returns empty', async () => {
+      alertsService.getAll.mockResolvedValue([]);
       const result = await service.getAllAlerts();
       expect(result).toEqual([]);
     });

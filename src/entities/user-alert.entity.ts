@@ -7,7 +7,7 @@ import {
 } from 'typeorm';
 
 @Entity('user_alerts')
-@Unique(['userId', 'guildId', 'alertType', 'alertValue'])
+@Unique(['userId', 'alertType', 'alertValue'])
 export class UserAlert {
   @PrimaryGeneratedColumn()
   id: number;
@@ -15,8 +15,8 @@ export class UserAlert {
   @Column({ name: 'user_id', length: 100 })
   userId: string;
 
-  @Column({ name: 'guild_id', length: 100 })
-  guildId: string;
+  @Column({ name: 'guild_id', type: 'varchar', length: 100, nullable: true })
+  guildId: string | null;
 
   @Column({ name: 'alert_type', length: 50 })
   alertType: string;

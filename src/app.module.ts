@@ -15,6 +15,7 @@ import { SmwsDistillery } from './entities/smws-distillery.entity';
 import { UserAlert } from './entities/user-alert.entity';
 import { User } from './users/user.entity';
 import { AuthModule } from './auth/auth.module';
+import { AlertsModule } from './alerts/alerts.module';
 
 config();
 
@@ -37,6 +38,7 @@ config();
     ScheduleModule.forRoot(),
     ScraperModule,
     AuthModule,
+    AlertsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

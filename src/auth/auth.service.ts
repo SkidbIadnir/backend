@@ -68,7 +68,7 @@ export class AuthService {
     }
 
     const saved = await this.userRepo.save(user);
-    return { token: this.jwtService.sign({ sub: saved.id }), user: saved };
+    return { token: this.jwtService.sign({ sub: saved.id, discordId: saved.discordId }), user: saved };
   }
 
   async getMe(userId: string) {
