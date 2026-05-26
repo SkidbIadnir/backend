@@ -1,7 +1,30 @@
-import { Controller, Delete, Get, Query, Req, Res, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Post,
+  Query,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
 import type { Response, Request } from 'express';
+import { IsNotEmpty, IsString } from 'class-validator';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
+
+class DeviceTokenDto {
+  @IsString()
+  @IsNotEmpty()
+  token: string;
+}
+
+interface AuthRequest extends Request {
+  user: { sub: string; discordId: string };
+}
 
 @Controller('auth')
 export class AuthController {
@@ -26,13 +49,27 @@ export class AuthController {
 
   @UseGuards(JwtAuthGuard)
   @Get('me')
-  me(@Req() req: Request & { user: { sub: string } }) {
+  me(@Req() req: AuthRequest) {
     return this.authService.getMe(req.user.sub);
   }
 
   @UseGuards(JwtAuthGuard)
+  @Post('device-token')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  registerDeviceToken(@Req() req: AuthRequest, @Body() dto: DeviceTokenDto) {
+    return this.authService.registerDeviceToken(req.user.sub, dto.token);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete('device-token')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  clearDeviceToken(@Req() req: AuthRequest) {
+    return this.authService.clearDeviceToken(req.user.sub);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Delete('discord')
-  disconnect(@Req() req: Request & { user: { sub: string } }) {
+  disconnect(@Req() req: AuthRequest) {
     return this.authService.deleteUser(req.user.sub);
   }
 }

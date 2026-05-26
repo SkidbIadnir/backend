@@ -24,6 +24,7 @@ import { ScraperService, ScrapedWhiskyData, ScrapedWhiskyListItem } from './scra
 import { SmwsLive } from '../entities/smws-live.entity';
 import { SmwsArchive } from '../entities/smws-archive.entity';
 import { SmwsDistillery } from '../entities/smws-distillery.entity';
+import { NotificationsService } from '../notifications/notifications.service';
 import { createMockRepository, MockRepository } from '../test-utils/mock-repository.factory';
 import { makeSmwsLive, makeScrapedWhisky, makeSmwsDistillery } from '../test-utils/fixtures';
 
@@ -32,11 +33,13 @@ describe('ScraperService', () => {
   let liveRepo: MockRepository<SmwsLive>;
   let archiveRepo: MockRepository<SmwsArchive>;
   let distilleryRepo: MockRepository<SmwsDistillery>;
+  let notificationsService: { notifyMatchingUsers: jest.Mock };
 
   beforeEach(async () => {
     liveRepo = createMockRepository<SmwsLive>();
     archiveRepo = createMockRepository<SmwsArchive>();
     distilleryRepo = createMockRepository<SmwsDistillery>();
+    notificationsService = { notifyMatchingUsers: jest.fn().mockResolvedValue(undefined) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -44,6 +47,7 @@ describe('ScraperService', () => {
         { provide: getRepositoryToken(SmwsLive), useValue: liveRepo },
         { provide: getRepositoryToken(SmwsArchive), useValue: archiveRepo },
         { provide: getRepositoryToken(SmwsDistillery), useValue: distilleryRepo },
+        { provide: NotificationsService, useValue: notificationsService },
       ],
     }).compile();
 

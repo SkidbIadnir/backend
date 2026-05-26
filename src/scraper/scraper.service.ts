@@ -4,6 +4,7 @@ import { In, Repository } from "typeorm";
 import { SmwsLive } from "../entities/smws-live.entity";
 import { SmwsArchive } from "../entities/smws-archive.entity";
 import { SmwsDistillery } from "../entities/smws-distillery.entity";
+import { NotificationsService } from "../notifications/notifications.service";
 import { firefox, Browser, Page } from "playwright";
 
 export interface ScrapedWhiskyData {
@@ -54,6 +55,7 @@ export class ScraperService {
     private readonly archiveRepo: Repository<SmwsArchive>,
     @InjectRepository(SmwsDistillery)
     private readonly distilleryRepo: Repository<SmwsDistillery>,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   private async initBrowser(): Promise<Browser> {
@@ -296,7 +298,10 @@ export class ScraperService {
         this.logger.log('Step 7: No new whiskies to scrape');
       }
 
-      this.logger.log('Step 9: Updating isNew flags...');
+      this.logger.log('Step 9: Sending push notifications for new whiskies...');
+      await this.notificationsService.notifyMatchingUsers(savedWhiskies);
+
+      this.logger.log('Step 10: Updating isNew flags...');
       await this.updateIsNewFlags();
 
       this.logger.log(`=== SCRAPER COMPLETED — new: ${newWhiskies.length}, saved: ${savedWhiskies.length}, unavailable: ${removedWhiskies.length} ===`);

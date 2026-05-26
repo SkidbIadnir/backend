@@ -77,6 +77,14 @@ export class AuthService {
     return { discordId: user.discordId, username: user.username, avatarUrl: user.avatarUrl };
   }
 
+  async registerDeviceToken(userId: string, token: string): Promise<void> {
+    await this.userRepo.update({ id: userId }, { pushToken: token });
+  }
+
+  async clearDeviceToken(userId: string): Promise<void> {
+    await this.userRepo.update({ id: userId }, { pushToken: null });
+  }
+
   async deleteUser(userId: string): Promise<void> {
     await this.userRepo.delete({ id: userId });
   }

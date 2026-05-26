@@ -16,6 +16,7 @@ import { UserAlert } from './entities/user-alert.entity';
 import { User } from './users/user.entity';
 import { AuthModule } from './auth/auth.module';
 import { AlertsModule } from './alerts/alerts.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 config();
 
@@ -39,6 +40,7 @@ config();
     ScraperModule,
     AuthModule,
     AlertsModule,
+    NotificationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

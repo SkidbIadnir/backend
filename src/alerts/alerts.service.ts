@@ -184,7 +184,7 @@ export class AlertsService {
   }
 
   // ---------------------------------------------------------------------------
-  // Internal helpers (kept for potential future use)
+  // Internal helpers
   // ---------------------------------------------------------------------------
 
   async getAll(): Promise<UserAlert[]> {
@@ -192,6 +192,15 @@ export class AlertsService {
       return await this.alertRepo.find();
     } catch (error) {
       this.logger.error('Error fetching all alerts:', error);
+      return [];
+    }
+  }
+
+  async getAllActive(): Promise<UserAlert[]> {
+    try {
+      return await this.alertRepo.find({ where: { isActive: true } });
+    } catch (error) {
+      this.logger.error('Error fetching active alerts:', error);
       return [];
     }
   }

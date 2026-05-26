@@ -20,6 +20,9 @@ export class User {
   @Column({ name: 'avatar_url', type: 'varchar', length: 255, nullable: true })
   avatarUrl: string | null;
 
+  @Column({ name: 'push_token', type: 'varchar', length: 512, nullable: true, default: null })
+  pushToken: string | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 
