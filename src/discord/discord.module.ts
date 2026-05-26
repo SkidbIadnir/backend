@@ -1,9 +1,8 @@
 import { Module } from '@nestjs/common';
-import { AlertsModule } from '../alerts/alerts.module';
 import { DiscordService } from './discord.service';
 
 @Module({
-  imports: [AlertsModule],
+  imports: [],
   providers: [DiscordService],
   exports: [DiscordService],
 })

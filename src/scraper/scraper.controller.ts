@@ -22,13 +22,6 @@ export class ScraperController {
     return { message: 'Archive scraper completed' };
   }
 
-  @Get('test-alerts')
-  async testAlerts() {
-    this.logger.log('Testing alerts against existing database entries.');
-    const result = await this.scraperService.testAlertsWithExistingData();
-    return { message: 'Alert test completed', result };
-  }
-
   /**
    * Scheduled job - Live scraper runs every day at midnight
    */

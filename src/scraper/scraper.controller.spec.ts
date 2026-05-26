@@ -11,14 +11,12 @@ describe('ScraperController', () => {
   let service: {
     runScraper: jest.Mock;
     runArchiveScraper: jest.Mock;
-    testAlertsWithExistingData: jest.Mock;
   };
 
   beforeEach(async () => {
     service = {
       runScraper: jest.fn().mockResolvedValue(undefined),
       runArchiveScraper: jest.fn().mockResolvedValue(undefined),
-      testAlertsWithExistingData: jest.fn().mockResolvedValue({ checked: 0, matched: 0 }),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -50,22 +48,6 @@ describe('ScraperController', () => {
     it('returns a message confirming completion', async () => {
       const result = await controller.runArchiveScraper();
       expect(result).toEqual({ message: 'Archive scraper completed' });
-    });
-  });
-
-  describe('GET /scraper/test-alerts', () => {
-    it('delegates to scraperService.testAlertsWithExistingData', async () => {
-      await controller.testAlerts();
-      expect(service.testAlertsWithExistingData).toHaveBeenCalledTimes(1);
-    });
-
-    it('wraps the service result in { message, result }', async () => {
-      service.testAlertsWithExistingData.mockResolvedValue({ checked: 5, matched: 2 });
-      const result = await controller.testAlerts();
-      expect(result).toEqual({
-        message: 'Alert test completed',
-        result: { checked: 5, matched: 2 },
-      });
     });
   });
 });

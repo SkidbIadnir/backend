@@ -24,26 +24,19 @@ import { ScraperService, ScrapedWhiskyData, ScrapedWhiskyListItem } from './scra
 import { SmwsLive } from '../entities/smws-live.entity';
 import { SmwsArchive } from '../entities/smws-archive.entity';
 import { SmwsDistillery } from '../entities/smws-distillery.entity';
-import { DiscordService } from '../discord/discord.service';
-import { UserAlert } from '../entities/user-alert.entity';
 import { createMockRepository, MockRepository } from '../test-utils/mock-repository.factory';
-import { makeSmwsLive, makeUserAlert, makeScrapedWhisky, makeSmwsDistillery } from '../test-utils/fixtures';
+import { makeSmwsLive, makeScrapedWhisky, makeSmwsDistillery } from '../test-utils/fixtures';
 
 describe('ScraperService', () => {
   let service: ScraperService;
   let liveRepo: MockRepository<SmwsLive>;
   let archiveRepo: MockRepository<SmwsArchive>;
   let distilleryRepo: MockRepository<SmwsDistillery>;
-  let discordService: { getAllAlerts: jest.Mock; sendAlertNotification: jest.Mock };
 
   beforeEach(async () => {
     liveRepo = createMockRepository<SmwsLive>();
     archiveRepo = createMockRepository<SmwsArchive>();
     distilleryRepo = createMockRepository<SmwsDistillery>();
-    discordService = {
-      getAllAlerts: jest.fn().mockResolvedValue([]),
-      sendAlertNotification: jest.fn().mockResolvedValue(undefined),
-    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -51,99 +44,10 @@ describe('ScraperService', () => {
         { provide: getRepositoryToken(SmwsLive), useValue: liveRepo },
         { provide: getRepositoryToken(SmwsArchive), useValue: archiveRepo },
         { provide: getRepositoryToken(SmwsDistillery), useValue: distilleryRepo },
-        { provide: DiscordService, useValue: discordService },
       ],
     }).compile();
 
     service = module.get<ScraperService>(ScraperService);
-  });
-
-  // ─── matchesAlert ───────────────────────────────────────────────────────────
-
-  describe('matchesAlert', () => {
-    const match = (whisky: Partial<SmwsLive>, alert: Partial<UserAlert>) =>
-      (service as any).matchesAlert(whisky, alert);
-
-    describe('distillery', () => {
-      it('matches distillery name case-insensitively', () => {
-        expect(match({ distillery: 'Glenfarclas', distilleryCode: '1' }, { alertType: 'distillery', alertValue: 'glenfarclas' })).toBe(true);
-      });
-
-      it('matches distillery name uppercase', () => {
-        expect(match({ distillery: 'Glenfarclas', distilleryCode: '1' }, { alertType: 'distillery', alertValue: 'GLENFARCLAS' })).toBe(true);
-      });
-
-      it('matches distillery code', () => {
-        expect(match({ distillery: 'Glenfarclas', distilleryCode: '1' }, { alertType: 'distillery', alertValue: '1' })).toBe(true);
-      });
-
-      it('returns false when neither name nor code matches', () => {
-        expect(match({ distillery: 'Glenfarclas', distilleryCode: '1' }, { alertType: 'distillery', alertValue: 'Glenlivet' })).toBe(false);
-      });
-
-      it('returns false when both distillery and code are null', () => {
-        expect(match({ distillery: null, distilleryCode: null }, { alertType: 'distillery', alertValue: 'Glenfarclas' })).toBe(false);
-      });
-    });
-
-    describe('region', () => {
-      it('matches region case-insensitively (lowercase value)', () => {
-        expect(match({ region: 'Speyside' }, { alertType: 'region', alertValue: 'speyside' })).toBe(true);
-      });
-
-      it('matches region case-insensitively (uppercase value)', () => {
-        expect(match({ region: 'Speyside' }, { alertType: 'region', alertValue: 'SPEYSIDE' })).toBe(true);
-      });
-
-      it('returns false on region mismatch', () => {
-        expect(match({ region: 'Speyside' }, { alertType: 'region', alertValue: 'Highland' })).toBe(false);
-      });
-
-      it('returns false when region is null', () => {
-        expect(match({ region: null }, { alertType: 'region', alertValue: 'Speyside' })).toBe(false);
-      });
-    });
-
-    describe('age', () => {
-      it('returns true when whisky age exceeds minimum', () => {
-        expect(match({ age: '12 years' }, { alertType: 'age', alertValue: '10' })).toBe(true);
-      });
-
-      it('returns true at exact boundary (equal ages)', () => {
-        expect(match({ age: '10' }, { alertType: 'age', alertValue: '10' })).toBe(true);
-      });
-
-      it('returns false when whisky age is below minimum', () => {
-        expect(match({ age: '9' }, { alertType: 'age', alertValue: '10' })).toBe(false);
-      });
-
-      it('returns false when age string is empty', () => {
-        expect(match({ age: '' }, { alertType: 'age', alertValue: '10' })).toBe(false);
-      });
-
-      it('returns false when age is null', () => {
-        expect(match({ age: null }, { alertType: 'age', alertValue: '10' })).toBe(false);
-      });
-
-      it('returns false when alertValue is not a number', () => {
-        expect(match({ age: '12' }, { alertType: 'age', alertValue: 'abc' })).toBe(false);
-      });
-
-      it('returns false when age is non-numeric string (NAS)', () => {
-        expect(match({ age: 'NAS' }, { alertType: 'age', alertValue: '10' })).toBe(false);
-      });
-
-      it('parses "12 years" correctly via parseInt', () => {
-        // parseInt('12 years') = 12 — this is intentional behaviour
-        expect(match({ age: '12 years' }, { alertType: 'age', alertValue: '12' })).toBe(true);
-      });
-    });
-
-    describe('unknown type', () => {
-      it('returns false for unrecognised alertType', () => {
-        expect(match({ distillery: 'Glenfarclas' }, { alertType: 'unknown', alertValue: 'anything' })).toBe(false);
-      });
-    });
   });
 
   // ─── findNewWhiskies ─────────────────────────────────────────────────────────
@@ -213,7 +117,6 @@ describe('ScraperService', () => {
       distilleryRepo.findBy!.mockResolvedValue([makeSmwsDistillery()]);
       const whisky = makeScrapedWhisky({ distillery: '', distilleryId: 1 });
       await service.saveWhiskiesToDatabase([whisky]);
-      // The service uses TypeORM In() operator, so we just verify findBy was called once
       expect(distilleryRepo.findBy).toHaveBeenCalledTimes(1);
     });
 
@@ -288,83 +191,10 @@ describe('ScraperService', () => {
     });
   });
 
-  // ─── checkAlertsAndNotify ────────────────────────────────────────────────────
-
-  describe('checkAlertsAndNotify', () => {
-    it('returns early without calling getAllAlerts when newWhiskies is empty', async () => {
-      await (service as any).checkAlertsAndNotify([]);
-      expect(discordService.getAllAlerts).not.toHaveBeenCalled();
-    });
-
-    it('does not send notifications when getAllAlerts returns empty', async () => {
-      discordService.getAllAlerts.mockResolvedValue([]);
-      await (service as any).checkAlertsAndNotify([makeSmwsLive()]);
-      expect(discordService.sendAlertNotification).not.toHaveBeenCalled();
-    });
-
-    it('sends a notification for each matching whisky+alert pair', async () => {
-      const w1 = makeSmwsLive({ distillery: 'Glenfarclas' });
-      const w2 = makeSmwsLive({ distillery: 'Glenfarclas', fullCode: '1.200', name: 'Second Dram' });
-      const alert = makeUserAlert({ alertType: 'distillery', alertValue: 'Glenfarclas' });
-      discordService.getAllAlerts.mockResolvedValue([alert]);
-      await (service as any).checkAlertsAndNotify([w1, w2]);
-      expect(discordService.sendAlertNotification).toHaveBeenCalledTimes(2);
-    });
-
-    it('does not send notification for non-matching pairs', async () => {
-      const whisky = makeSmwsLive({ distillery: 'Glenfarclas' });
-      const alert = makeUserAlert({ alertType: 'distillery', alertValue: 'Glenlivet' });
-      discordService.getAllAlerts.mockResolvedValue([alert]);
-      await (service as any).checkAlertsAndNotify([whisky]);
-      expect(discordService.sendAlertNotification).not.toHaveBeenCalled();
-    });
-
-    it('sends correct number with 2 whiskies × 2 matching alerts', async () => {
-      const w1 = makeSmwsLive({ region: 'Speyside' });
-      const w2 = makeSmwsLive({ region: 'Speyside', fullCode: '1.200', name: 'Another' });
-      const a1 = makeUserAlert({ alertType: 'region', alertValue: 'Speyside', userId: 'u1' });
-      const a2 = makeUserAlert({ alertType: 'region', alertValue: 'Speyside', userId: 'u2' });
-      discordService.getAllAlerts.mockResolvedValue([a1, a2]);
-      await (service as any).checkAlertsAndNotify([w1, w2]);
-      expect(discordService.sendAlertNotification).toHaveBeenCalledTimes(4);
-    });
-  });
-
-  // ─── testAlertsWithExistingData ──────────────────────────────────────────────
-
-  describe('testAlertsWithExistingData', () => {
-    it('returns { checked: 0, matched: 0 } when getAllAlerts returns empty', async () => {
-      liveRepo.find!.mockResolvedValue([makeSmwsLive()]);
-      discordService.getAllAlerts.mockResolvedValue([]);
-      const result = await service.testAlertsWithExistingData();
-      expect(result).toEqual({ checked: 0, matched: 0 });
-    });
-
-    it('returns correct checked and matched counts', async () => {
-      const whisky = makeSmwsLive({ distillery: 'Glenfarclas' });
-      liveRepo.find!.mockResolvedValue([whisky]);
-      const alert = makeUserAlert({ alertType: 'distillery', alertValue: 'Glenfarclas' });
-      discordService.getAllAlerts.mockResolvedValue([alert]);
-      const result = await service.testAlertsWithExistingData();
-      expect(result.checked).toBe(1);
-      expect(result.matched).toBe(1);
-    });
-
-    it('calls sendAlertNotification for matching pairs', async () => {
-      const whisky = makeSmwsLive({ distillery: 'Glenfarclas' });
-      liveRepo.find!.mockResolvedValue([whisky]);
-      const alert = makeUserAlert({ alertType: 'distillery', alertValue: 'Glenfarclas' });
-      discordService.getAllAlerts.mockResolvedValue([alert]);
-      await service.testAlertsWithExistingData();
-      expect(discordService.sendAlertNotification).toHaveBeenCalledTimes(1);
-    });
-  });
-
   // ─── runScraper smoke test ───────────────────────────────────────────────────
 
   describe('runScraper (smoke)', () => {
     beforeEach(() => {
-      // Bypass all delay() calls so the empty-page retry doesn't stall tests
       jest.spyOn(service as any, 'delay').mockResolvedValue(undefined);
       liveRepo.find!.mockResolvedValue([]);
     });
@@ -372,13 +202,6 @@ describe('ScraperService', () => {
     it('calls liveRepo.find to fetch existing whiskies', async () => {
       await service.runScraper();
       expect(liveRepo.find).toHaveBeenCalled();
-    });
-
-    it('skips getAllAlerts when there are no new whiskies to check', async () => {
-      // With evaluate() mocked to return [], there are no new whiskies, so
-      // checkAlertsAndNotify([]) returns early before calling getAllAlerts
-      await service.runScraper();
-      expect(discordService.getAllAlerts).not.toHaveBeenCalled();
     });
 
     it('does not throw with all dependencies mocked', async () => {

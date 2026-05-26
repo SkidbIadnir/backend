@@ -9,6 +9,8 @@ export const makeUserAlert = (overrides: Partial<UserAlert> = {}): UserAlert => 
   guildId: 'guild-456',
   alertType: 'distillery',
   alertValue: 'Glenfarclas',
+  name: null,
+  isActive: true,
   createdAt: new Date('2024-01-01'),
   ...overrides,
 });

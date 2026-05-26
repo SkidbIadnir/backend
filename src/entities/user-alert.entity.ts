@@ -24,6 +24,12 @@ export class UserAlert {
   @Column({ name: 'alert_value', length: 255 })
   alertValue: string;
 
+  @Column({ name: 'name', type: 'varchar', length: 255, nullable: true, default: null })
+  name: string | null;
+
+  @Column({ name: 'is_active', type: 'boolean', default: true })
+  isActive: boolean;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 }

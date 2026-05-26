@@ -1,8 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { In, Repository } from "typeorm";
-import { DiscordService } from "../discord/discord.service";
-import { UserAlert } from "../entities/user-alert.entity";
 import { SmwsLive } from "../entities/smws-live.entity";
 import { SmwsArchive } from "../entities/smws-archive.entity";
 import { SmwsDistillery } from "../entities/smws-distillery.entity";
@@ -43,8 +41,6 @@ export interface ScrapedWhiskyListItem {
   href: string;
 }
 
-type AlertWhiskyFields = Pick<SmwsLive, 'distillery' | 'distilleryCode' | 'region' | 'age'>;
-
 @Injectable()
 export class ScraperService {
   private readonly logger = new Logger(ScraperService.name);
@@ -58,7 +54,6 @@ export class ScraperService {
     private readonly archiveRepo: Repository<SmwsArchive>,
     @InjectRepository(SmwsDistillery)
     private readonly distilleryRepo: Repository<SmwsDistillery>,
-    private readonly discordService: DiscordService,
   ) {}
 
   private async initBrowser(): Promise<Browser> {
@@ -248,134 +243,6 @@ export class ScraperService {
     return detailedWhiskies;
   }
 
-  /**
-   * Determines whether a whisky matches a given user alert.
-   */
-  private matchesAlert(whisky: AlertWhiskyFields, alert: UserAlert): boolean {
-    switch (alert.alertType) {
-      case 'distillery': {
-        const nameMatch = whisky.distillery?.toLowerCase() === alert.alertValue.toLowerCase();
-        const codeMatch = whisky.distilleryCode?.toLowerCase() === alert.alertValue.toLowerCase();
-        return nameMatch || codeMatch;
-      }
-      case 'region':
-        return whisky.region?.toLowerCase() === alert.alertValue.toLowerCase();
-      case 'age': {
-        const minAge = parseInt(alert.alertValue);
-        const whiskyAge = parseInt(whisky.age || '');
-        return !isNaN(minAge) && !isNaN(whiskyAge) && whiskyAge >= minAge;
-      }
-      default:
-        return false;
-    }
-  }
-
-  private async checkAlertsAndNotify(newWhiskies: SmwsLive[]): Promise<void> {
-    if (newWhiskies.length === 0) {
-      this.logger.log('No new whiskies to check for alerts');
-      return;
-    }
-
-    this.logger.log(`Checking ${newWhiskies.length} new whiskies against user alerts...`);
-
-    try {
-      const alerts = await this.discordService.getAllAlerts();
-      if (alerts.length === 0) {
-        this.logger.log('No active alerts to check');
-        return;
-      }
-
-      this.logger.log(`Found ${alerts.length} active alerts`);
-      let notificationsSent = 0;
-
-      for (const whisky of newWhiskies) {
-        for (const alert of alerts) {
-          if (!this.matchesAlert(whisky, alert)) continue;
-
-          this.logger.log(
-            `Alert match — user: ${alert.userId}, whisky: ${whisky.name}, alert: ${alert.alertType}=${alert.alertValue}`,
-          );
-
-          await this.discordService.sendAlertNotification(
-            alert.userId,
-            alert.guildId,
-            {
-              name: whisky.name,
-              distillery: whisky.distillery ?? undefined,
-              region: whisky.region ?? undefined,
-              age: whisky.age ?? undefined,
-              price: whisky.price ?? undefined,
-              abv: whisky.abv ?? undefined,
-              url: whisky.url!,
-            },
-            alert.alertType,
-            alert.alertValue,
-          );
-
-          notificationsSent++;
-        }
-      }
-
-      this.logger.log(`Alert notifications sent: ${notificationsSent}`);
-    } catch (error) {
-      this.logger.error('Error checking alerts:', error);
-    }
-  }
-
-  async testAlertsWithExistingData(): Promise<{ checked: number; matched: number }> {
-    this.logger.log('=== TESTING ALERTS WITH EXISTING DATA ===');
-
-    try {
-      const dbWhiskies = await this.liveRepo.find({
-        where: { available: true },
-        order: { createdAt: 'DESC' },
-      });
-      this.logger.log(`Found ${dbWhiskies.length} available whiskies in database`);
-
-      const alerts = await this.discordService.getAllAlerts();
-      if (alerts.length === 0) {
-        this.logger.log('No active alerts to test');
-        return { checked: 0, matched: 0 };
-      }
-
-      this.logger.log(`Testing against ${alerts.length} active alerts`);
-      let matchCount = 0;
-
-      for (const whisky of dbWhiskies) {
-        for (const alert of alerts) {
-          if (!this.matchesAlert(whisky, alert)) continue;
-
-          matchCount++;
-          this.logger.log(
-            `MATCH: "${whisky.name}" matches alert (${alert.alertType}=${alert.alertValue}) for user ${alert.userId}`,
-          );
-
-          await this.discordService.sendAlertNotification(
-            alert.userId,
-            alert.guildId,
-            {
-              name: whisky.name,
-              distillery: whisky.distillery ?? undefined,
-              region: whisky.region ?? undefined,
-              age: whisky.age ?? undefined,
-              price: whisky.price ?? undefined,
-              abv: whisky.abv ?? undefined,
-              url: whisky.url!,
-            },
-            alert.alertType,
-            alert.alertValue,
-          );
-        }
-      }
-
-      this.logger.log(`=== TEST COMPLETE: ${matchCount} matches found ===`);
-      return { checked: dbWhiskies.length, matched: matchCount };
-    } catch (error) {
-      this.logger.error('Error testing alerts:', error);
-      throw error;
-    }
-  }
-
   async runScraper(): Promise<void> {
     this.logger.log("=== STARTING SMWS SCRAPER ===");
 
@@ -429,10 +296,7 @@ export class ScraperService {
         this.logger.log('Step 7: No new whiskies to scrape');
       }
 
-      this.logger.log('Step 9: Checking alerts for new whiskies...');
-      await this.checkAlertsAndNotify(savedWhiskies);
-
-      this.logger.log('Step 10: Updating isNew flags...');
+      this.logger.log('Step 9: Updating isNew flags...');
       await this.updateIsNewFlags();
 
       this.logger.log(`=== SCRAPER COMPLETED — new: ${newWhiskies.length}, saved: ${savedWhiskies.length}, unavailable: ${removedWhiskies.length} ===`);

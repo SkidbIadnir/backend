@@ -1,4 +1,4 @@
-import { IsEnum, IsNotEmpty, IsString } from 'class-validator';
+import { IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class CreateAlertDto {
   @IsEnum(['distillery', 'region', 'age'], {
@@ -9,4 +9,8 @@ export class CreateAlertDto {
   @IsString()
   @IsNotEmpty()
   alertValue: string;
+
+  @IsOptional()
+  @IsString()
+  name?: string;
 }
