@@ -1,193 +1,227 @@
-# SMWS Watchtower Backend
+# Backend — Tasteep & SMWS Watchtower
 
-Personal backend platform built with NestJS. The first production module is **SMWS Watchtower** — a whisky alert system that scrapes the Society's live inventory and notifies users via Discord bot and Firebase push notifications when bottles matching their preferences appear.
+One NestJS process, one PostgreSQL database, **two completely independent projects**:
 
-## Features
+| Project | Folder | Tables | Routes | JWT audience |
+|---|---|---|---|---|
+| **Tasteep** — spirit-tasting journal behind the Flutter app | `src/tasteep/` | `tasteep_*` | `/auth/*`, `/tasteep/*` | `tasteep` |
+| **SMWS Watchtower** — scrapes smws.eu and serves the inventory to a website | `src/smws/` | `smws_*` | `/smws/*` | none (no auth) |
 
-- Live and archive scraper using Playwright (headless Firefox) against the SMWS website
-- Alert matching by distillery, region, or minimum age
-- Discord bot with slash commands for managing alerts
-- Firebase Cloud Messaging push notifications for mobile/web clients
-- REST API with Discord OAuth2 and JWT authentication
-- PostgreSQL storage via TypeORM
-- Scheduled jobs (live scraper daily at midnight, archive every 2 days at 01:00)
-- Docker-ready with CI/CD via GitHub Actions
+Nothing in `src/tasteep/` imports from `src/smws/` or vice versa. Tasteep owns users, auth
+and JWTs; SMWS has no users at all. The only shared code is the root wiring
+(`app.module.ts`, `main.ts`) and a generic jest helper (`src/test-utils/`).
 
-## Tech Stack
-
-| Layer | Technology |
-|---|---|
-| Framework | NestJS 11 / TypeScript 5 |
-| Database | PostgreSQL 14+ / TypeORM |
-| Discord | discord.js 14 |
-| Scraping | Playwright 1.57 (Firefox) |
-| Auth | Discord OAuth2, Passport JWT |
-| Push notifications | Firebase Admin SDK |
-| Scheduling | @nestjs/schedule (cron) |
-| Runtime | Node.js 20 |
-| Container | Docker (node:20-bookworm) |
-
-## Architecture
+## Repository layout
 
 ```
-Discord User
-    │  slash commands (/alert-add, /alert-list, /alert-remove)
-    ▼
-Discord Bot (discord.js)
-    │  stores / reads alerts
-    ▼
-PostgreSQL  ◄──────────────────────────────────────────────┐
-    │  active alerts                                        │
-    ▼                                                       │
-Scraper (Playwright)  ──► SMWS Website (smws.eu)           │
-    │  new whiskies                                         │
-    ▼                                                       │
-Alert Matching  ─────────────────── smws_live table ───────┘
-    │  matched whiskies
-    ▼
-Notifications Service
-    ├── Firebase FCM push → mobile/web clients
-    └── (Discord DM — dormant, planned)
+src/
+├── app.module.ts            TypeORM root (autoLoadEntities) + the two project modules
+├── main.ts                  CORS, global ValidationPipe (whitelist)
+├── test-utils/              generic jest mocks (repository / query-builder)
+│
+├── tasteep/
+│   ├── tasteep.module.ts
+│   ├── tasteep-config.ts    every TASTEEP_* env var in one place
+│   ├── entities/            tasteep_users, tasteep_sessions, tasteep_email_otps,
+│   │                        tasteep_tastings, tasteep_geocode_cache
+│   ├── auth/                /auth/* — email OTP, Google ID token, Discord code, sessions
+│   │   ├── tasteep-auth.controller.ts / .service.ts / .module.ts
+│   │   ├── otp.service.ts               issue/verify 6-digit codes (HMAC, TTL, attempts, cooldown)
+│   │   ├── google-verifier.service.ts   google-auth-library ID-token check
+│   │   ├── discord-oauth.service.ts     authorize URL + server-side code exchange
+│   │   ├── tasteep-jwt.strategy.ts      validates the JWT *and* the session row
+│   │   ├── tasteep-jwt-auth.guard.ts
+│   │   ├── auth-user.ts                 AuthUser JSON mapper
+│   │   └── dto/
+│   ├── mail/                nodemailer SMTP transport (logs the code when SMTP is unset)
+│   ├── tastings/            /tasteep/tastings, /tasteep/stats, /tasteep/cabinet
+│   │   ├── tastings.controller.ts / .service.ts / .module.ts
+│   │   ├── tasting.mapper.ts            entity ⇄ snake_case JSON contract
+│   │   └── dto/
+│   ├── geocode/             /tasteep/geocode — cache-first Nominatim with a 1 req/s limiter
+│   └── test-utils/          Tasteep fixtures
+│
+└── smws/
+    ├── smws.module.ts
+    ├── entities/            smws_live, smws_archive, smws_lookout, smws_distilleries
+    ├── scraper/             Playwright scraper, cron jobs, API-key-guarded manual triggers
+    ├── watchtower/          /smws/watchtower/live and /archive — public read endpoints
+    ├── postgres/            distillery seed / purge helpers
+    ├── data/                distillery reference JSON
+    └── test-utils/          SMWS fixtures
+
+docs/
+└── tasteep-api.md           full client contract for the Flutter app
 ```
 
-### Modules
+## Tasteep
 
-| Module | Responsibility |
+### Auth
+
+Three ways to obtain a bearer token, all returning the same `AuthUser` JSON
+(`{id, display_name, provider, email, token}`):
+
+| Provider | Flow |
 |---|---|
-| `alerts` | CRUD for user alerts + matching logic |
-| `auth` | Discord OAuth2 flow, JWT generation, device token storage |
-| `discord` | Bot init, slash command registration, channel messaging |
-| `scraper` | Playwright scraper, scheduled jobs, alert triggering |
-| `watchtower` | Read-only access to live whisky inventory |
-| `notifications` | Alert matching pipeline + FCM push dispatch |
-| `postgres` | Legacy direct-query layer, table init, distillery seed |
+| Email | `POST /auth/email {email}` sends a 6-digit code (10 min TTL, 5 attempts, 60 s resend cooldown). `POST /auth/email/verify {email, code}` returns the `AuthUser`. |
+| Google | Client does `google_sign_in`, posts the ID token to `POST /auth/google {id_token}`. Verified against `TASTEEP_GOOGLE_CLIENT_IDS`. |
+| Discord | Client opens `GET /auth/discord`, catches the `code` on its `tasteep://` redirect, posts `POST /auth/discord {code, redirect_uri}`. The client secret stays on the server. |
 
-## Prerequisites
+Accounts are keyed on `(provider, provider_id)`. A verified email that already belongs to an
+account signs into that account regardless of provider, so one person does not end up with
+two journals.
 
-- Node.js 20+
-- PostgreSQL 14+
-- A Discord application with a bot token and OAuth2 credentials
-- (Optional) Firebase project for push notifications
+**Sessions.** Every login inserts a `tasteep_sessions` row and issues a long-lived JWT
+(`TASTEEP_JWT_EXPIRES_IN`, default 365 d) carrying `sub` (user) and `sid` (session). The
+guard loads the session on every request, so `POST /auth/signout` revokes a token for real.
+`GET /auth/me` restores the session on app start.
+
+### Data
+
+`tasteep_tastings` follows the handoff schema one-to-one (snake_case columns, `text[]` tags,
+check constraints on `category`, `location_precision`, `score`, indexes on
+`(user_id, date_tasted)` and `(user_id, category)`). Two deliberate deviations:
+
+- `photo_path` instead of `photo_url`: photos stay on the device for now, so the column holds
+  whatever opaque string the client sends and echoes it back. No upload endpoint exists.
+- `tasteep_geocode_cache.lat/lon` are nullable: misses are cached as `unknown` so a place
+  Nominatim cannot resolve is never asked for again.
+
+### Endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/auth/email` | Send login code |
+| `POST` | `/auth/email/verify` | Exchange code for `AuthUser` |
+| `POST` | `/auth/google` | Google ID-token login |
+| `GET` | `/auth/discord` | Redirect to Discord consent page |
+| `POST` | `/auth/discord` | Discord code login |
+| `GET` | `/auth/me` | Current user (validates stored token) |
+| `POST` | `/auth/signout` | Revoke this session |
+| `GET` | `/tasteep/tastings[?unplaced=true]` | List (newest `date_tasted` first) |
+| `GET` | `/tasteep/tastings/:id` | One tasting |
+| `PUT` | `/tasteep/tastings/:id` | Upsert, full replacement, client-generated UUID |
+| `DELETE` | `/tasteep/tastings/:id` | Delete |
+| `PUT` | `/tasteep/tastings/:id/location` | Manual pin / geocode result / clear |
+| `GET` | `/tasteep/stats` | `{count, avg_score, distinct_distilleries}` |
+| `GET` | `/tasteep/cabinet` | Per-distillery `{distillery, count, avg_score}` |
+| `POST` | `/tasteep/geocode` | `{query}` → `{lat, lon, precision}` |
+
+Request/response details, status codes and the location-precision rules are in
+[docs/tasteep-api.md](./docs/tasteep-api.md).
+
+### Rules enforced server-side
+
+- Everything under `/tasteep/*` is scoped to the user in the token; there is no cross-user read.
+- A `manual` location pin is never overwritten by an automated geocode, whether it arrives via
+  the location endpoint (`409`) or inside a full `PUT` (the stored pin is kept).
+- Nominatim is called at most once per second for the whole server, always with the
+  identifying `TASTEEP_NOMINATIM_USER_AGENT`, and every result (including "not found") is
+  cached forever. Identical concurrent queries share one upstream request.
+
+## SMWS Watchtower
+
+A scraper and a public read-only feed, nothing else: no users, no auth, no notifications.
+The Playwright scraper runs on a schedule (live inventory daily at midnight, archive every
+2 days at 01:00) and writes to `smws_live` / `smws_archive`; the website reads them back.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| `GET` | `/smws/watchtower/live` | none | Bottles currently listed on smws.eu, newest first |
+| `GET` | `/smws/watchtower/archive` | none | Every bottle the archive scraper has seen, newest first |
+| `GET` | `/smws/scraper/run-live` | `x-api-key` | Run the live scraper now |
+| `GET` | `/smws/scraper/run-archive` | `x-api-key` | Run the archive scraper now |
+
+The manual triggers require the `x-api-key` header to equal `SMWS_SCRAPER_API_KEY`; when
+that variable is unset they answer `403` and only the cron schedule runs the scraper.
 
 ## Setup
 
 ```bash
-git clone <repo>
-cd backend
 npm install
-cp .env.example .env
-# fill in .env values — see table below
-```
-
-### Environment Variables
-
-| Variable | Required | Description |
-|---|---|---|
-| `POSTGRES_HOST` | Yes | Database host |
-| `POSTGRES_PORT` | Yes | Database port (default `5432`) |
-| `POSTGRES_DB` | Yes | Database name |
-| `POSTGRES_USER` | Yes | Database user |
-| `POSTGRES_PASSWORD` | Yes | Database password |
-| `DISCORD_BOT_TOKEN` | Yes | Bot token from Discord Developer Portal |
-| `DISCORD_CLIENT_ID` | Yes | OAuth2 client ID |
-| `DISCORD_CLIENT_SECRET` | Yes | OAuth2 client secret |
-| `APP_URL` | Yes | Public base URL of this API (e.g. `https://api.example.com`) |
-| `JWT_SECRET` | Yes | Secret used to sign JWT tokens |
-| `FIREBASE_PROJECT_ID` | No | Firebase project ID (push notifications) |
-| `FIREBASE_CLIENT_EMAIL` | No | Firebase service account email |
-| `FIREBASE_PRIVATE_KEY` | No | Firebase service account private key (`\n`-escaped) |
-
-### First-time Database Init
-
-After the app starts, seed the distillery reference data and ensure all tables exist:
-
-```bash
-curl http://localhost:3000/postgres/tables
-```
-
-## Running the App
-
-```bash
-# Development (watch mode)
+cp .env.example .env   # fill in — every variable is documented in the file
 npm run start:dev
-
-# Production
-npm run build
-npm run start:prod
 ```
 
-## Docker
+Requirements: Node 20+, PostgreSQL 14+. Outside production (`NODE_ENV !== 'production'`)
+TypeORM `synchronize` creates and alters tables on boot; in production apply the schema
+yourself or run once with synchronize before switching the flag.
 
-```bash
-docker build -t smws-backend .
-docker run -p 3000:3000 --env-file .env smws-backend
-```
+### Environment variables
 
-The CI/CD pipeline (`.github/workflows/ci-cd.yml`) builds and pushes the image to `ghcr.io` on every push.
-
-## API Reference
-
-All alert and auth endpoints require a `Authorization: Bearer <jwt>` header unless noted.
-
-| Method | Path | Auth | Description |
+| Variable | Project | Required | Notes |
 |---|---|---|---|
-| `GET` | `/` | No | Health check |
-| `GET` | `/auth/discord` | No | Redirect to Discord OAuth flow |
-| `GET` | `/auth/callback` | No | Discord OAuth callback, returns JWT |
-| `POST` | `/auth/device-token` | Yes | Register FCM device token for push notifications |
-| `GET` | `/alerts` | Yes | List user's alerts with live match counts |
-| `POST` | `/alerts` | Yes | Create a new alert |
-| `PATCH` | `/alerts/:id` | Yes | Update alert (name, criteria, active status) |
-| `DELETE` | `/alerts/:id` | Yes | Delete an alert |
-| `GET` | `/alerts/:id/matches` | Yes | Whiskies currently matching this alert |
-| `GET` | `/watchtower/live` | Yes | Live whisky inventory |
-| `GET` | `/scraper/run-live` | No | Trigger live scraper immediately |
-| `GET` | `/scraper/run-archive` | No | Trigger archive scraper immediately |
-| `GET` | `/postgres/tables` | No | Check/init tables and seed distilleries |
-| `DELETE` | `/postgres/tables/purge` | No | Purge all SMWS data tables (destructive) |
+| `POSTGRES_HOST/PORT/DB/USER/PASSWORD` | both | yes | |
+| `APP_URL` | both | yes | Public base URL, used for OAuth callbacks |
+| `PORT` | both | no | default 3000 |
+| `FRONTEND_URL` | both | no | CORS origins, comma-separated |
+| `TASTEEP_JWT_SECRET` | Tasteep | yes | falls back to `JWT_SECRET` |
+| `TASTEEP_JWT_EXPIRES_IN` | Tasteep | no | default `365d` |
+| `TASTEEP_SMTP_HOST/PORT/SECURE/USER/PASS/FROM` | Tasteep | no | unset → OTP logged to console |
+| `TASTEEP_OTP_TTL_MINUTES` / `_MAX_ATTEMPTS` / `_RESEND_COOLDOWN_SECONDS` | Tasteep | no | 10 / 5 / 60 |
+| `TASTEEP_GOOGLE_CLIENT_IDS` | Tasteep | for Google login | comma-separated |
+| `TASTEEP_DISCORD_CLIENT_ID/SECRET/REDIRECT_URI` | Tasteep | for Discord login | |
+| `TASTEEP_NOMINATIM_USER_AGENT` | Tasteep | for geocoding | e.g. `Tasteep/1.0 (you@example.com)` |
+| `TASTEEP_NOMINATIM_URL` | Tasteep | no | default public Nominatim |
+| `SMWS_SCRAPER_API_KEY` | SMWS | no | unset → manual scraper triggers disabled |
 
-Full REST API schema: [docs/alerts-api.md](./docs/alerts-api.md)
+## Postman
 
-## Discord Bot Commands
+A ready-to-import collection lives in `postman/`:
 
-| Command | Parameters | Description |
-|---|---|---|
-| `/alert-add` | `type: distillery\|region\|age`, `value: <string>` | Create an alert |
-| `/alert-list` | — | List your active alerts |
-| `/alert-remove` | `id: <number>` | Remove an alert by ID |
+- `Backend.postman_collection.json` — every route in this README, grouped into Tasteep Auth,
+  Tasteep Tastings, Tasteep Aggregates & Geocode, SMWS Watchtower and SMWS Scraper.
+- `local.postman_environment.json` — `base_url` plus the variables the requests need
+  (`tasteep_email`, `tasteep_otp_code`, `scraper_api_key`, ...).
 
-**Alert type examples:**
-
-```
-/alert-add type:distillery value:Ardbeg
-/alert-add type:region value:Islay
-/alert-add type:age value:15
-```
-
-## Scheduled Jobs
-
-| Job | Schedule | Manual trigger |
-|---|---|---|
-| Live scraper | Daily at midnight | `GET /scraper/run-live` |
-| Archive scraper | Every 2 days at 01:00 | `GET /scraper/run-archive` |
-
-The live scraper compares the fetched inventory against the existing DB and marks new rows with `is_new = true`, then runs the alert-matching pipeline.
+Import both in Postman, select the **Backend - Local** environment, then run **Tasteep — Auth
+→ Request Email Code**, copy the code from the server log (or your inbox once SMTP is
+configured) into the `tasteep_otp_code` variable, and run **Verify Email Code** — it saves the
+bearer token into the environment automatically, so every other Tasteep request just works.
+SMWS's watchtower requests need no auth; its scraper triggers need `scraper_api_key` set to
+match `SMWS_SCRAPER_API_KEY`.
 
 ## Development
 
 ```bash
-# Unit tests
-npm run test
-
-# Test coverage
+npm run test        # unit tests (jest, no database needed)
 npm run test:cov
-
-# E2E tests
-npm run test:e2e
-
-# Lint
 npm run lint
-
-# Format
-npm run format
+npm run build
 ```
+
+Unit tests mock TypeORM repositories (`src/test-utils/mock-repository.factory.ts`) and cover
+the OTP lifecycle, account resolution, session revocation, the tasting upsert and location
+rules, the stats/cabinet parsing, the geocode cache and the rate limiter.
+
+To exercise the real HTTP flow against a database, run Postgres in Docker and point the
+env at it; without SMTP configured the login code is printed in the server log:
+
+```bash
+docker run -d --rm --name pg -e POSTGRES_PASSWORD=dev -p 5432:5432 postgres:16-alpine
+POSTGRES_PASSWORD=dev TASTEEP_JWT_SECRET=dev APP_URL=http://localhost:3000 npm run start:dev
+curl -X POST localhost:3000/auth/email -H 'content-type: application/json' -d '{"email":"you@example.com"}'
+```
+
+## Docker / CI
+
+```bash
+docker build -t backend .
+docker run -p 3000:3000 --env-file .env backend
+```
+
+`.github/workflows/ci-cd.yml` runs `npm test`, then builds and pushes the image to `ghcr.io`
+on every push to `master`.
+
+## Decisions & open items
+
+- Email login = OTP code (no deep link needed on mobile). Tokens = long-lived JWT + revocable
+  `tasteep_sessions` row. Google = ID-token verification, Discord = server-side code exchange.
+- Photos remain on-device; `photo_path` is opaque. Add an upload endpoint + object storage
+  when a home for the files is chosen.
+- `?unplaced=true` on the list endpoint was chosen over a separate `/unplaced` route.
+- Settings columns (`theme_mode`, `score_scale`, `unit_system`, `currency`) exist on
+  `tasteep_users` but have no endpoint yet.
+- SMWS lost its Discord login, alerts and push notifications on purpose: it only feeds a
+  website now. The old `users`, `user_alerts`, `smws_users` and `tastings` tables are not
+  migrated; drop them manually if they still exist in a database created by earlier versions.

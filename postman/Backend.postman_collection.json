@@ -1,0 +1,695 @@
+{
+  "info": {
+    "_postman_id": "b4b6b1a0-1234-4abc-9def-tasteep-smws",
+    "name": "Backend \u2014 Tasteep & SMWS Watchtower",
+    "description": "Two independent projects behind one API.\n\n- **Tasteep** \u2014 spirit-tasting journal for the Flutter app. Routes `/auth/*` and `/tasteep/*`, bearer-token auth.\n- **SMWS Watchtower** \u2014 scraper + public read-only whisky feed for a website. Routes `/smws/*`, no auth on reads, optional `x-api-key` on manual scraper triggers.\n\nSet `base_url` in the environment (defaults to `http://localhost:3000`). Run the **Tasteep Auth \u2192 Request Email Code** then **Verify Email Code** requests first \u2014 the token is captured into `{{tasteep_token}}` automatically and reused by every other Tasteep request.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3000"
+    }
+  ],
+  "item": [
+    {
+      "name": "Tasteep \u2014 Auth",
+      "item": [
+        {
+          "name": "Request Email Code",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('returns code_sent', () => pm.expect(body.status).to.eql('code_sent'));",
+                  "console.log('Check the server log for the OTP code if SMTP is not configured, then set {{tasteep_otp_code}} and run Verify Email Code.');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{tasteep_email}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/email",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "email"
+              ]
+            },
+            "description": "Step 1 of email login. Sends a 6-digit code (10 min TTL). Answers 429 if a code was sent in the last 60s.\n\nIf SMTP is not configured on the server, the code is printed in the server's console log instead of emailed."
+          }
+        },
+        {
+          "name": "Verify Email Code",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('has a token', () => pm.expect(body.token).to.be.a('string'));",
+                  "if (body.token) {",
+                  "  pm.environment.set('tasteep_token', body.token);",
+                  "  pm.environment.set('tasteep_user_id', body.id);",
+                  "  console.log('Saved tasteep_token and tasteep_user_id to the environment.');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{tasteep_email}}\",\n  \"code\": \"{{tasteep_otp_code}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/email/verify",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "email",
+                "verify"
+              ]
+            },
+            "description": "Step 2 of email login. Set the environment variable `tasteep_otp_code` to the code from the server log or your inbox, then send. On success this saves `tasteep_token` for every other Tasteep request in this collection."
+          }
+        },
+        {
+          "name": "Login with Google",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id_token\": \"{{google_id_token}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/google",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "google"
+              ]
+            },
+            "description": "Body carries the ID token from the client's google_sign_in flow. Requires TASTEEP_GOOGLE_CLIENT_IDS to be configured server-side; 503 otherwise."
+          }
+        },
+        {
+          "name": "Discord Authorize Redirect (browser only)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/auth/discord?redirect_uri={{discord_redirect_uri}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "discord"
+              ],
+              "query": [
+                {
+                  "key": "redirect_uri",
+                  "value": "{{discord_redirect_uri}}"
+                }
+              ]
+            },
+            "description": "302 redirect to Discord's consent page. Open this in a browser, not via Send \u2014 Postman won't follow the app-deep-link redirect. Copy the `code` query param Discord appends to `discord_redirect_uri` and paste it into the `discord_code` environment variable."
+          }
+        },
+        {
+          "name": "Login with Discord",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const body = pm.response.json();",
+                  "  pm.environment.set('tasteep_token', body.token);",
+                  "  pm.environment.set('tasteep_user_id', body.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"{{discord_code}}\",\n  \"redirect_uri\": \"{{discord_redirect_uri}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/discord",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "discord"
+              ]
+            },
+            "description": "Exchanges the authorization code from the redirect step. `redirect_uri` must match what was used to open the authorize page."
+          }
+        },
+        {
+          "name": "Get Current User",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tasteep_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/me",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "me"
+              ]
+            },
+            "description": "Restores/validates the current session. 401 if the token is expired, unknown, or was signed out."
+          }
+        },
+        {
+          "name": "Sign Out",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tasteep_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/signout",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "signout"
+              ]
+            },
+            "description": "Revokes this session server-side. The saved tasteep_token stops working immediately after this \u2014 re-run the email login requests to get a new one."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Tasteep \u2014 Tastings",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{tasteep_token}}",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "List Tastings",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/tasteep/tastings",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "tastings"
+              ]
+            },
+            "description": "Newest date_tasted first, undated entries last."
+          }
+        },
+        {
+          "name": "List Unplaced Tastings",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/tasteep/tastings?unplaced=true",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "tastings"
+              ],
+              "query": [
+                {
+                  "key": "unplaced",
+                  "value": "true"
+                }
+              ]
+            },
+            "description": "Only location_precision in unknown/country \u2014 the Atlas \"NOT PLACED\" shelf."
+          }
+        },
+        {
+          "name": "Upsert Tasting (Create)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('tasting_id')) {",
+                  "  pm.environment.set('tasting_id', pm.variables.replaceIn('{{$guid}}'));",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('id matches', () => pm.expect(body.id).to.eql(pm.environment.get('tasting_id')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Lagavulin 16\",\n  \"category\": \"whisky\",\n  \"photo_path\": null,\n  \"distillery\": \"Lagavulin\",\n  \"region\": \"Islay\",\n  \"abv\": 43,\n  \"price\": 65.5,\n  \"age_statement\": \"16\",\n  \"cask_type\": \"Ex-bourbon & sherry\",\n  \"date_tasted\": \"2026-03-10T19:00:00.000Z\",\n  \"location\": \"Home\",\n  \"score\": 88,\n  \"appearance\": \"Deep amber\",\n  \"tags\": [\"peat\", \"smoke\"],\n  \"nose\": \"Bonfire\",\n  \"palate\": \"Iodine\",\n  \"finish\": \"Long\",\n  \"lat\": null,\n  \"lon\": null,\n  \"location_precision\": \"unknown\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "tastings",
+                "{{tasting_id}}"
+              ]
+            },
+            "description": "PUT is upsert. :id must be a UUID \u2014 set the tasting_id environment variable yourself (or use {{$guid}} in the URL) before the first run. This is a full replacement: any field you omit is stored as null."
+          }
+        },
+        {
+          "name": "Get Tasting",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "tastings",
+                "{{tasting_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Upsert Tasting (Update)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Lagavulin 16\",\n  \"distillery\": \"Lagavulin\",\n  \"score\": 91,\n  \"tags\": [\"peat\", \"smoke\", \"revisited\"]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "tastings",
+                "{{tasting_id}}"
+              ]
+            },
+            "description": "Replaces the same row. Fields omitted here (region, abv, price, ...) are cleared to null \u2014 this endpoint is not a PATCH."
+          }
+        },
+        {
+          "name": "Set Manual Location Pin",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lat\": 55.63,\n  \"lon\": -6.13,\n  \"precision\": \"manual\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id}}/location",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "tastings",
+                "{{tasting_id}}",
+                "location"
+              ]
+            },
+            "description": "A manual pin. Always accepted, and future automated geocode results will not overwrite it (see next request)."
+          }
+        },
+        {
+          "name": "Set Automated Location (rejected \u2014 409 expected)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('rejected because the tasting has a manual pin', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lat\": 1,\n  \"lon\": 2,\n  \"precision\": \"exact\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id}}/location",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "tastings",
+                "{{tasting_id}}",
+                "location"
+              ]
+            },
+            "description": "Demonstrates the manual-pin protection: run this right after \"Set Manual Location Pin\" and it should 409."
+          }
+        },
+        {
+          "name": "Clear Location",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"precision\": \"unknown\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id}}/location",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "tastings",
+                "{{tasting_id}}",
+                "location"
+              ]
+            },
+            "description": "Clears lat/lon even over a manual pin \u2014 this is the one precision value that always wins."
+          }
+        },
+        {
+          "name": "Delete Tasting",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "tastings",
+                "{{tasting_id}}"
+              ]
+            },
+            "description": "204 on success, 404 if already deleted or never created."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Tasteep \u2014 Aggregates & Geocode",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{tasteep_token}}",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "Stats",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/tasteep/stats",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "stats"
+              ]
+            },
+            "description": "{count, avg_score, distinct_distilleries} for the Profile stat grid."
+          }
+        },
+        {
+          "name": "Cabinet",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/tasteep/cabinet",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "cabinet"
+              ]
+            },
+            "description": "Tastings grouped by distillery with a per-group average score, most-stocked first."
+          }
+        },
+        {
+          "name": "Geocode a Place",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"Islay, Scotland\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/tasteep/geocode",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "geocode"
+              ]
+            },
+            "description": "Cache-first Nominatim lookup. 404 if nothing matches (also cached, never re-queried). 503 if TASTEEP_NOMINATIM_USER_AGENT is not configured server-side."
+          }
+        }
+      ]
+    },
+    {
+      "name": "SMWS \u2014 Watchtower (public)",
+      "item": [
+        {
+          "name": "Live Inventory",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/smws/watchtower/live",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "smws",
+                "watchtower",
+                "live"
+              ]
+            },
+            "description": "No auth. Bottles currently listed on smws.eu, newest first."
+          }
+        },
+        {
+          "name": "Archive Inventory",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/smws/watchtower/archive",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "smws",
+                "watchtower",
+                "archive"
+              ]
+            },
+            "description": "No auth. Every bottle the archive scraper has ever seen, newest first."
+          }
+        }
+      ]
+    },
+    {
+      "name": "SMWS \u2014 Scraper (x-api-key)",
+      "item": [
+        {
+          "name": "Run Live Scraper",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{scraper_api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/smws/scraper/run-live",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "smws",
+                "scraper",
+                "run-live"
+              ]
+            },
+            "description": "Triggers the live scraper immediately. Requires SMWS_SCRAPER_API_KEY to be set server-side and matched here \u2014 403 otherwise."
+          }
+        },
+        {
+          "name": "Run Archive Scraper",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{scraper_api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/smws/scraper/run-archive",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "smws",
+                "scraper",
+                "run-archive"
+              ]
+            },
+            "description": "Triggers the archive scraper immediately. Same auth as run-live."
+          }
+        }
+      ]
+    }
+  ]
+}

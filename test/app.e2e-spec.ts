@@ -1,3 +1,5 @@
+import '../src/env'; // must run before AppModule is required — see src/env.ts
+
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
