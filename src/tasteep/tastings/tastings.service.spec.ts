@@ -1,6 +1,10 @@
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { In } from 'typeorm';
 import { TastingsService } from './tastings.service';
 import { TasteepTasting } from '../entities/tasteep-tasting.entity';
@@ -228,7 +232,8 @@ describe('TastingsService', () => {
       setup(makeTasting());
       await expect(
         service.updateLocation(USER_ID, TASTING_ID, { precision: 'manual' }),
-      ).rejects.toBeInstanceOf(ConflictException);
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(repo.save).not.toHaveBeenCalled();
     });
 
     it('404s for a tasting owned by someone else', async () => {

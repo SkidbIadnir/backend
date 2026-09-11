@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -114,7 +115,7 @@ export class TastingsService {
       tasting.locationPrecision = 'unknown';
     } else {
       if (dto.lat == null || dto.lon == null) {
-        throw new ConflictException(
+        throw new BadRequestException(
           `lat and lon are required for precision "${dto.precision}".`,
         );
       }

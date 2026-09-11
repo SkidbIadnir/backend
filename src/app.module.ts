@@ -32,7 +32,8 @@ import { TasteepModule } from './tasteep/tasteep.module';
       password: process.env.POSTGRES_PASSWORD || 'postgres',
       autoLoadEntities: true,
       synchronize: process.env.NODE_ENV !== 'production',
-      logging: process.env.NODE_ENV !== 'production',
+      // SQL logging in dev only; the e2e suite sets NODE_ENV=test to keep its output readable.
+      logging: !['production', 'test'].includes(process.env.NODE_ENV ?? ''),
     }),
     ScheduleModule.forRoot(),
     SmwsModule,

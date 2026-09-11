@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "b4b6b1a0-1234-4abc-9def-tasteep-smws",
     "name": "Backend \u2014 Tasteep & SMWS Watchtower",
-    "description": "Two independent projects behind one API.\n\n- **Tasteep** \u2014 spirit-tasting journal for the Flutter app. Routes `/auth/*` and `/tasteep/*`, bearer-token auth.\n- **SMWS Watchtower** \u2014 scraper + public read-only whisky feed for a website. Routes `/smws/*`, no auth on reads, optional `x-api-key` on manual scraper triggers.\n\nSet `base_url` in the environment (defaults to `http://localhost:3000`). Run the **Tasteep Auth \u2192 Request Email Code** then **Verify Email Code** requests first \u2014 the token is captured into `{{tasteep_token}}` automatically and reused by every other Tasteep request.",
+    "description": "Two independent projects behind one API.\n\n- **Tasteep** \u2014 spirit-tasting journal for the Flutter app. Routes `/auth/*` and `/tasteep/*`, bearer-token auth.\n- **SMWS Watchtower** \u2014 scraper + public read-only whisky feed for a website. Routes `/smws/*`, no auth on reads, optional `x-api-key` on manual scraper triggers.\n\nSet `base_url` in the environment (defaults to `http://localhost:3000`).\n\n**Getting a token:** run **Tasteep \u2014 Auth \u2192 Request Email Code**, read the 6-digit code from the server log (or your inbox if SMTP is configured), put it in `tasteep_otp_code`, then run **Verify Email Code** \u2014 the token is saved into `tasteep_token` and reused by every other Tasteep request.\n\n**Running the journal as a test suite:** the *Tastings \u2192 Atlas (phase 2) \u2192 Cleanup* folders are ordered and fully asserted. Run them with the Collection Runner, or headless with `TASTEEP_TOKEN=\u2026 npm run test:postman` (newman). Leave *Sign Out* for last \u2014 it revokes the token.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -215,7 +215,22 @@
               ]
             },
             "description": "Restores/validates the current session. 401 if the token is expired, unknown, or was signed out."
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('is the logged-in user', () => pm.expect(body.id).to.eql(pm.environment.get('tasteep_user_id')));",
+                  "pm.test('provider is known', () => pm.expect(body.provider).to.be.oneOf(['email', 'google', 'discord']));",
+                  "pm.test('no token is re-issued on /me', () => pm.expect(body.token).to.be.null);"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Sign Out",
@@ -255,21 +270,13 @@
     },
     {
       "name": "Tasteep \u2014 Tastings",
-      "auth": {
-        "type": "bearer",
-        "bearer": [
-          {
-            "key": "token",
-            "value": "{{tasteep_token}}",
-            "type": "string"
-          }
-        ]
-      },
+      "description": "Phase 1 journal CRUD. Needs `tasteep_token` (run the Auth folder first, or pass it to newman). Creates two tastings (`tasting_id`, `tasting_id_2`) that the Atlas folder builds on and the Cleanup folder deletes.",
       "item": [
         {
           "name": "List Tastings",
           "request": {
             "method": "GET",
+            "header": [],
             "url": {
               "raw": "{{base_url}}/tasteep/tastings",
               "host": [
@@ -280,13 +287,307 @@
                 "tastings"
               ]
             },
-            "description": "Newest date_tasted first, undated entries last."
-          }
+            "description": "Newest date_tasted first, undated entries last. Only the caller's rows."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const TASTING_KEYS = [\"id\", \"name\", \"category\", \"photo_path\", \"distillery\", \"region\", \"abv\", \"price\", \"age_statement\", \"cask_type\", \"date_tasted\", \"location\", \"score\", \"appearance\", \"tags\", \"nose\", \"palate\", \"finish\", \"lat\", \"lon\", \"location_precision\", \"created_at\", \"updated_at\"];",
+                  "const expectTastingShape = (t) => pm.expect(Object.keys(t).sort()).to.eql([...TASTING_KEYS].sort());",
+                  "const body = pm.response.json();",
+                  "pm.test('is a plain array (no envelope)', () => pm.expect(body).to.be.an('array'));",
+                  "pm.test('every item has the full Tasting contract', () => body.forEach(expectTastingShape));",
+                  "pm.test('newest date_tasted first, undated last', () => {",
+                  "  const dates = body.map((t) => t.date_tasted);",
+                  "  const dated = dates.filter((d) => d !== null);",
+                  "  for (let i = 1; i < dated.length; i++) pm.expect(dated[i - 1] >= dated[i], `${dated[i - 1]} before ${dated[i]}`).to.be.true;",
+                  "  const firstNull = dates.indexOf(null);",
+                  "  if (firstNull !== -1) pm.expect(dates.slice(firstNull).every((d) => d === null)).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ]
         },
+        {
+          "name": "Upsert Tasting (Create)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "tastings",
+                "{{tasting_id}}"
+              ]
+            },
+            "description": "PUT is upsert. `:id` must be a UUID \u2014 the pre-request script generates `tasting_id` if the environment has none. Full replacement: any field you omit is stored as null.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Lagavulin 16\",\n  \"category\": \"whisky\",\n  \"photo_path\": null,\n  \"distillery\": \"Lagavulin\",\n  \"region\": \"Islay\",\n  \"abv\": 43,\n  \"price\": 65.5,\n  \"age_statement\": \"16\",\n  \"cask_type\": \"Ex-bourbon & sherry\",\n  \"date_tasted\": \"2026-03-10T19:00:00.000Z\",\n  \"location\": \"Home\",\n  \"score\": 88,\n  \"appearance\": \"Deep amber\",\n  \"tags\": [\n    \"peat\",\n    \"smoke\"\n  ],\n  \"nose\": \"Bonfire\",\n  \"palate\": \"Iodine\",\n  \"finish\": \"Long\",\n  \"lat\": null,\n  \"lon\": null,\n  \"location_precision\": \"unknown\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('tasting_id')) pm.environment.set('tasting_id', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const TASTING_KEYS = [\"id\", \"name\", \"category\", \"photo_path\", \"distillery\", \"region\", \"abv\", \"price\", \"age_statement\", \"cask_type\", \"date_tasted\", \"location\", \"score\", \"appearance\", \"tags\", \"nose\", \"palate\", \"finish\", \"lat\", \"lon\", \"location_precision\", \"created_at\", \"updated_at\"];",
+                  "const expectTastingShape = (t) => pm.expect(Object.keys(t).sort()).to.eql([...TASTING_KEYS].sort());",
+                  "const body = pm.response.json();",
+                  "pm.test('id matches the URL', () => pm.expect(body.id).to.eql(pm.environment.get('tasting_id')));",
+                  "pm.test('has the full Tasting contract', () => expectTastingShape(body));",
+                  "pm.test('numbers come back as numbers', () => { pm.expect(body.abv).to.eql(43); pm.expect(body.price).to.eql(65.5); pm.expect(body.score).to.eql(88); });",
+                  "pm.test('dates are ISO 8601', () => pm.expect(body.date_tasted).to.eql('2026-03-10T19:00:00.000Z'));",
+                  "pm.test('server owns created_at/updated_at', () => { pm.expect(body.created_at).to.be.a('string'); pm.expect(body.updated_at).to.be.a('string'); });",
+                  "pm.test('starts unplaced', () => { pm.expect(body.location_precision).to.eql('unknown'); pm.expect(body.lat).to.be.null; });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Upsert Second Tasting (Create)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id_2}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "tastings",
+                "{{tasting_id_2}}"
+              ]
+            },
+            "description": "A second entry (different distillery, older date, `country` precision with coordinates) so the list order, the unplaced shelf, stats and cabinet have something to show.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Ardbeg 10\",\n  \"category\": \"whisky\",\n  \"photo_path\": null,\n  \"distillery\": \"Ardbeg\",\n  \"region\": \"Islay\",\n  \"abv\": 46,\n  \"price\": 48,\n  \"age_statement\": \"10\",\n  \"cask_type\": null,\n  \"date_tasted\": \"2025-12-25T18:00:00.000Z\",\n  \"location\": \"Home\",\n  \"score\": 70,\n  \"appearance\": \"Deep amber\",\n  \"tags\": [\n    \"peat\",\n    \"citrus\"\n  ],\n  \"nose\": \"Lime & tar\",\n  \"palate\": \"Ash\",\n  \"finish\": \"Medium\",\n  \"lat\": 56.49,\n  \"lon\": -4.2,\n  \"location_precision\": \"country\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('tasting_id_2')) pm.environment.set('tasting_id_2', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('id matches the URL', () => pm.expect(body.id).to.eql(pm.environment.get('tasting_id_2')));",
+                  "pm.test('coordinates and precision stored', () => { pm.expect(body.lat).to.eql(56.49); pm.expect(body.lon).to.eql(-4.2); pm.expect(body.location_precision).to.eql('country'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Tasting",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "tastings",
+                "{{tasting_id}}"
+              ]
+            },
+            "description": "404 for an id that does not exist or belongs to another account."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const TASTING_KEYS = [\"id\", \"name\", \"category\", \"photo_path\", \"distillery\", \"region\", \"abv\", \"price\", \"age_statement\", \"cask_type\", \"date_tasted\", \"location\", \"score\", \"appearance\", \"tags\", \"nose\", \"palate\", \"finish\", \"lat\", \"lon\", \"location_precision\", \"created_at\", \"updated_at\"];",
+                  "const expectTastingShape = (t) => pm.expect(Object.keys(t).sort()).to.eql([...TASTING_KEYS].sort());",
+                  "const body = pm.response.json();",
+                  "pm.test('is the created tasting', () => { pm.expect(body.id).to.eql(pm.environment.get('tasting_id')); pm.expect(body.name).to.eql('Lagavulin 16'); });",
+                  "pm.test('has the full Tasting contract', () => expectTastingShape(body));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Upsert Tasting (Update)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "tastings",
+                "{{tasting_id}}"
+              ]
+            },
+            "description": "Replaces the same row. Fields omitted here (region, abv, price, ...) are cleared to null \u2014 this endpoint is not a PATCH.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Lagavulin 16\",\n  \"distillery\": \"Lagavulin\",\n  \"score\": 91,\n  \"tags\": [\n    \"peat\",\n    \"smoke\",\n    \"revisited\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('new values stored', () => { pm.expect(body.score).to.eql(91); pm.expect(body.tags).to.eql(['peat', 'smoke', 'revisited']); });",
+                  "pm.test('omitted fields are cleared (PUT, not PATCH)', () => { pm.expect(body.region).to.be.null; pm.expect(body.abv).to.be.null; pm.expect(body.date_tasted).to.be.null; });",
+                  "pm.test('defaults apply to the non-nullable fields', () => { pm.expect(body.category).to.eql('whisky'); pm.expect(body.location_precision).to.eql('unknown'); });",
+                  "pm.test('updated_at bumped past created_at', () => pm.expect(body.updated_at >= body.created_at).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Upsert Tasting (Invalid \u2014 400 expected)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "tastings",
+                "{{tasting_id}}"
+              ]
+            },
+            "description": "Validation: empty name, score above 100 and an unknown precision. The row is left untouched.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"\",\n  \"score\": 101,\n  \"location_precision\": \"gps\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "const body = pm.response.json();",
+                  "pm.test('message lists every failing field', () => { pm.expect(body.message).to.be.an('array'); ['name', 'score', 'location_precision'].forEach((f) => pm.expect(body.message.join(' ')).to.include(f)); });"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{tasteep_token}}",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Tasteep \u2014 Atlas (phase 2)",
+      "description": "The Places / Cabinet backend: geocoding via Nominatim (cache-first, 1 req/s server-wide), the per-tasting location route with its manual-pin protection, the \"NOT PLACED\" shelf, and the stats / cabinet aggregates. Runs after the Tastings folder; expects `tasting_id` and `tasting_id_2` to exist.",
+      "item": [
         {
           "name": "List Unplaced Tastings",
           "request": {
             "method": "GET",
+            "header": [],
             "url": {
               "raw": "{{base_url}}/tasteep/tastings?unplaced=true",
               "host": [
@@ -303,23 +604,10 @@
                 }
               ]
             },
-            "description": "Only location_precision in unknown/country \u2014 the Atlas \"NOT PLACED\" shelf."
-          }
-        },
-        {
-          "name": "Upsert Tasting (Create)",
+            "description": "Only `location_precision` in `unknown`/`country` \u2014 the Atlas \"NOT PLACED\" shelf (`unknown` \u2192 SET LOCATION, `country` \u2192 REFINE). Both tastings created above qualify at this point."
+          },
+          "response": [],
           "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (!pm.environment.get('tasting_id')) {",
-                  "  pm.environment.set('tasting_id', pm.variables.replaceIn('{{$guid}}'));",
-                  "}"
-                ]
-              }
-            },
             {
               "listen": "test",
               "script": {
@@ -327,246 +615,13 @@
                 "exec": [
                   "pm.test('status is 200', () => pm.response.to.have.status(200));",
                   "const body = pm.response.json();",
-                  "pm.test('id matches', () => pm.expect(body.id).to.eql(pm.environment.get('tasting_id')));"
+                  "pm.test('only unknown/country precision', () => body.forEach((t) => pm.expect(t.location_precision).to.be.oneOf(['unknown', 'country'])));",
+                  "const ids = body.map((t) => t.id);",
+                  "pm.test('both fresh tastings are on the shelf', () => { pm.expect(ids).to.include(pm.environment.get('tasting_id')); pm.expect(ids).to.include(pm.environment.get('tasting_id_2')); });"
                 ]
               }
             }
-          ],
-          "request": {
-            "method": "PUT",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Lagavulin 16\",\n  \"category\": \"whisky\",\n  \"photo_path\": null,\n  \"distillery\": \"Lagavulin\",\n  \"region\": \"Islay\",\n  \"abv\": 43,\n  \"price\": 65.5,\n  \"age_statement\": \"16\",\n  \"cask_type\": \"Ex-bourbon & sherry\",\n  \"date_tasted\": \"2026-03-10T19:00:00.000Z\",\n  \"location\": \"Home\",\n  \"score\": 88,\n  \"appearance\": \"Deep amber\",\n  \"tags\": [\"peat\", \"smoke\"],\n  \"nose\": \"Bonfire\",\n  \"palate\": \"Iodine\",\n  \"finish\": \"Long\",\n  \"lat\": null,\n  \"lon\": null,\n  \"location_precision\": \"unknown\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id}}",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "tasteep",
-                "tastings",
-                "{{tasting_id}}"
-              ]
-            },
-            "description": "PUT is upsert. :id must be a UUID \u2014 set the tasting_id environment variable yourself (or use {{$guid}} in the URL) before the first run. This is a full replacement: any field you omit is stored as null."
-          }
-        },
-        {
-          "name": "Get Tasting",
-          "request": {
-            "method": "GET",
-            "url": {
-              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id}}",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "tasteep",
-                "tastings",
-                "{{tasting_id}}"
-              ]
-            }
-          }
-        },
-        {
-          "name": "Upsert Tasting (Update)",
-          "request": {
-            "method": "PUT",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Lagavulin 16\",\n  \"distillery\": \"Lagavulin\",\n  \"score\": 91,\n  \"tags\": [\"peat\", \"smoke\", \"revisited\"]\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id}}",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "tasteep",
-                "tastings",
-                "{{tasting_id}}"
-              ]
-            },
-            "description": "Replaces the same row. Fields omitted here (region, abv, price, ...) are cleared to null \u2014 this endpoint is not a PATCH."
-          }
-        },
-        {
-          "name": "Set Manual Location Pin",
-          "request": {
-            "method": "PUT",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"lat\": 55.63,\n  \"lon\": -6.13,\n  \"precision\": \"manual\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id}}/location",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "tasteep",
-                "tastings",
-                "{{tasting_id}}",
-                "location"
-              ]
-            },
-            "description": "A manual pin. Always accepted, and future automated geocode results will not overwrite it (see next request)."
-          }
-        },
-        {
-          "name": "Set Automated Location (rejected \u2014 409 expected)",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('rejected because the tasting has a manual pin', () => pm.response.to.have.status(409));"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "PUT",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"lat\": 1,\n  \"lon\": 2,\n  \"precision\": \"exact\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id}}/location",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "tasteep",
-                "tastings",
-                "{{tasting_id}}",
-                "location"
-              ]
-            },
-            "description": "Demonstrates the manual-pin protection: run this right after \"Set Manual Location Pin\" and it should 409."
-          }
-        },
-        {
-          "name": "Clear Location",
-          "request": {
-            "method": "PUT",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"precision\": \"unknown\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id}}/location",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "tasteep",
-                "tastings",
-                "{{tasting_id}}",
-                "location"
-              ]
-            },
-            "description": "Clears lat/lon even over a manual pin \u2014 this is the one precision value that always wins."
-          }
-        },
-        {
-          "name": "Delete Tasting",
-          "request": {
-            "method": "DELETE",
-            "url": {
-              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id}}",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "tasteep",
-                "tastings",
-                "{{tasting_id}}"
-              ]
-            },
-            "description": "204 on success, 404 if already deleted or never created."
-          }
-        }
-      ]
-    },
-    {
-      "name": "Tasteep \u2014 Aggregates & Geocode",
-      "auth": {
-        "type": "bearer",
-        "bearer": [
-          {
-            "key": "token",
-            "value": "{{tasteep_token}}",
-            "type": "string"
-          }
-        ]
-      },
-      "item": [
-        {
-          "name": "Stats",
-          "request": {
-            "method": "GET",
-            "url": {
-              "raw": "{{base_url}}/tasteep/stats",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "tasteep",
-                "stats"
-              ]
-            },
-            "description": "{count, avg_score, distinct_distilleries} for the Profile stat grid."
-          }
-        },
-        {
-          "name": "Cabinet",
-          "request": {
-            "method": "GET",
-            "url": {
-              "raw": "{{base_url}}/tasteep/cabinet",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "tasteep",
-                "cabinet"
-              ]
-            },
-            "description": "Tastings grouped by distillery with a per-group average score, most-stocked first."
-          }
+          ]
         },
         {
           "name": "Geocode a Place",
@@ -578,10 +633,6 @@
                 "value": "application/json"
               }
             ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"query\": \"Islay, Scotland\"\n}"
-            },
             "url": {
               "raw": "{{base_url}}/tasteep/geocode",
               "host": [
@@ -592,10 +643,831 @@
                 "geocode"
               ]
             },
-            "description": "Cache-first Nominatim lookup. 404 if nothing matches (also cached, never re-queried). 503 if TASTEEP_NOMINATIM_USER_AGENT is not configured server-side."
-          }
+            "description": "Cache-first Nominatim lookup. The first ever run of a query hits Nominatim (max 1 req/s for the whole server); every later run of the same normalised query is served from `tasteep_geocode_cache`. 503 if `TASTEEP_NOMINATIM_USER_AGENT` is not configured server-side. Saves the result into `geocode_*` for the next requests.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"Islay, Scotland\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('returns {lat, lon, precision}', () => { pm.expect(Object.keys(body).sort()).to.eql(['lat', 'lon', 'precision']); pm.expect(body.lat).to.be.a('number'); pm.expect(body.lon).to.be.a('number'); });",
+                  "pm.test('coordinates are in range', () => { pm.expect(body.lat).to.be.within(-90, 90); pm.expect(body.lon).to.be.within(-180, 180); });",
+                  "pm.test('precision is an automated value', () => pm.expect(body.precision).to.be.oneOf(['exact', 'region', 'country']));",
+                  "pm.test('Islay lands in the Hebrides', () => { pm.expect(body.lat).to.be.within(55.5, 56.0); pm.expect(body.lon).to.be.within(-6.6, -5.9); });",
+                  "pm.environment.set('geocode_lat', body.lat);",
+                  "pm.environment.set('geocode_lon', body.lon);",
+                  "pm.environment.set('geocode_precision', body.precision);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Geocode a Place (cache hit)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/tasteep/geocode",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "geocode"
+              ]
+            },
+            "description": "Same place, different casing and whitespace: normalised to the same cache key, so this never reaches Nominatim.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"  ISLAY,   Scotland \"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('identical to the first result', () => { pm.expect(body.lat).to.eql(pm.environment.get('geocode_lat')); pm.expect(body.lon).to.eql(pm.environment.get('geocode_lon')); pm.expect(body.precision).to.eql(pm.environment.get('geocode_precision')); });",
+                  "pm.test('served fast (cache, no upstream call)', () => pm.expect(pm.response.responseTime).to.be.below(500));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Geocode Unknown Place (404 expected)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/tasteep/geocode",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "geocode"
+              ]
+            },
+            "description": "A miss is cached as `unknown` too, so the same query never hits Nominatim again.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"xq zv nowhere-at-all tasteep\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Geocode Empty Query (400 expected)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/tasteep/geocode",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "geocode"
+              ]
+            },
+            "description": "Validation only \u2014 Nominatim is not called.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"   \"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Apply Geocode Result to Tasting",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id}}/location",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "tastings",
+                "{{tasting_id}}",
+                "location"
+              ]
+            },
+            "description": "What the client does after a geocode: store the result on the tasting. The tasting is `unknown` at this point, so an automated precision is accepted. The body is built from the `geocode_*` variables saved by \"Geocode a Place\" (raw JSON, numbers unquoted \u2014 see the pre-request script).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lat\": \"{{geocode_lat}}\",\n  \"lon\": \"{{geocode_lon}}\",\n  \"precision\": \"{{geocode_precision}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Postman variables are strings inside a raw body; rebuild the JSON so lat/lon stay numbers.",
+                  "pm.request.body.raw = JSON.stringify({",
+                  "  lat: Number(pm.environment.get('geocode_lat')),",
+                  "  lon: Number(pm.environment.get('geocode_lon')),",
+                  "  precision: pm.environment.get('geocode_precision'),",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const TASTING_KEYS = [\"id\", \"name\", \"category\", \"photo_path\", \"distillery\", \"region\", \"abv\", \"price\", \"age_statement\", \"cask_type\", \"date_tasted\", \"location\", \"score\", \"appearance\", \"tags\", \"nose\", \"palate\", \"finish\", \"lat\", \"lon\", \"location_precision\", \"created_at\", \"updated_at\"];",
+                  "const expectTastingShape = (t) => pm.expect(Object.keys(t).sort()).to.eql([...TASTING_KEYS].sort());",
+                  "const body = pm.response.json();",
+                  "pm.test('returns the full updated tasting', () => expectTastingShape(body));",
+                  "pm.test('geocode result stored', () => { pm.expect(body.lat).to.eql(pm.environment.get('geocode_lat')); pm.expect(body.lon).to.eql(pm.environment.get('geocode_lon')); pm.expect(body.location_precision).to.eql(pm.environment.get('geocode_precision')); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Set Manual Location Pin",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id}}/location",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "tastings",
+                "{{tasting_id}}",
+                "location"
+              ]
+            },
+            "description": "A pin drop. Always accepted, and future automated geocode results will not overwrite it (see next requests).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lat\": 55.63,\n  \"lon\": -6.13,\n  \"precision\": \"manual\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('pin stored as manual', () => { pm.expect(body.lat).to.eql(55.63); pm.expect(body.lon).to.eql(-6.13); pm.expect(body.location_precision).to.eql('manual'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Set Automated Location (rejected \u2014 409 expected)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id}}/location",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "tastings",
+                "{{tasting_id}}",
+                "location"
+              ]
+            },
+            "description": "The manual-pin protection, enforced server-side: an automated result never overwrites a manual pin.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lat\": 1,\n  \"lon\": 2,\n  \"precision\": \"exact\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('rejected because the tasting has a manual pin', () => pm.response.to.have.status(409));",
+                  "pm.test('explains why', () => pm.expect(pm.response.json().message).to.include('pinned manually'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Upsert Keeps Manual Pin",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "tastings",
+                "{{tasting_id}}"
+              ]
+            },
+            "description": "The same protection on the full upsert: a body carrying an automated precision does not move a manual pin. (Sending `manual` with new coordinates would move it.)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Lagavulin 16\",\n  \"category\": \"whisky\",\n  \"photo_path\": null,\n  \"distillery\": \"Lagavulin\",\n  \"region\": \"Islay\",\n  \"abv\": 43,\n  \"price\": 65.5,\n  \"age_statement\": \"16\",\n  \"cask_type\": \"Ex-bourbon & sherry\",\n  \"date_tasted\": \"2026-03-10T19:00:00.000Z\",\n  \"location\": \"Home\",\n  \"score\": 88,\n  \"appearance\": \"Deep amber\",\n  \"tags\": [\n    \"peat\",\n    \"smoke\"\n  ],\n  \"nose\": \"Bonfire\",\n  \"palate\": \"Iodine\",\n  \"finish\": \"Long\",\n  \"lat\": 1,\n  \"lon\": 2,\n  \"location_precision\": \"exact\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('manual pin survived the upsert', () => { pm.expect(body.lat).to.eql(55.63); pm.expect(body.lon).to.eql(-6.13); pm.expect(body.location_precision).to.eql('manual'); });",
+                  "pm.test('the rest of the body was applied', () => pm.expect(body.region).to.eql('Islay'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Move Manual Pin",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id}}/location",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "tastings",
+                "{{tasting_id}}",
+                "location"
+              ]
+            },
+            "description": "A second manual pin replaces the first.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lat\": 55.64,\n  \"lon\": -6.12,\n  \"precision\": \"manual\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('pin moved', () => { pm.expect(body.lat).to.eql(55.64); pm.expect(body.lon).to.eql(-6.12); pm.expect(body.location_precision).to.eql('manual'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Location Without Coordinates (400 expected)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id}}/location",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "tastings",
+                "{{tasting_id}}",
+                "location"
+              ]
+            },
+            "description": "lat/lon are required for every precision except `unknown`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"precision\": \"manual\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Clear Location",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id}}/location",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "tastings",
+                "{{tasting_id}}",
+                "location"
+              ]
+            },
+            "description": "Clears lat/lon even over a manual pin \u2014 this is the one precision value that always wins. The tasting is back on the \"NOT PLACED\" shelf.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"precision\": \"unknown\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('coordinates cleared', () => { pm.expect(body.lat).to.be.null; pm.expect(body.lon).to.be.null; pm.expect(body.location_precision).to.eql('unknown'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Set Automated Location (accepted after clear)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id}}/location",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "tastings",
+                "{{tasting_id}}",
+                "location"
+              ]
+            },
+            "description": "Once the pin is cleared, automated results are accepted again.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lat\": 55.7585,\n  \"lon\": -6.1657,\n  \"precision\": \"region\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('automated result stored', () => pm.expect(pm.response.json().location_precision).to.eql('region'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Unplaced Tastings (after placing)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/tasteep/tastings?unplaced=true",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "tastings"
+              ],
+              "query": [
+                {
+                  "key": "unplaced",
+                  "value": "true"
+                }
+              ]
+            },
+            "description": "`tasting_id` is now `region`, so it left the shelf; `tasting_id_2` (`country`) is still there."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const ids = pm.response.json().map((t) => t.id);",
+                  "pm.test('placed tasting left the shelf', () => pm.expect(ids).to.not.include(pm.environment.get('tasting_id')));",
+                  "pm.test('country-precision tasting is still on it', () => pm.expect(ids).to.include(pm.environment.get('tasting_id_2')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/tasteep/stats",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "stats"
+              ]
+            },
+            "description": "`{count, avg_score, distinct_distilleries}` for the Profile stat grid. `avg_score` is null when no scored tasting exists."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('exact shape', () => pm.expect(Object.keys(body).sort()).to.eql(['avg_score', 'count', 'distinct_distilleries']));",
+                  "pm.test('counts both fresh tastings', () => pm.expect(body.count).to.be.at.least(2));",
+                  "pm.test('avg_score is a 1-decimal number between 0 and 100', () => { pm.expect(body.avg_score).to.be.a('number'); pm.expect(body.avg_score).to.be.within(0, 100); pm.expect(Math.round(body.avg_score * 10) / 10).to.eql(body.avg_score); });",
+                  "pm.test('at least Lagavulin and Ardbeg', () => pm.expect(body.distinct_distilleries).to.be.at.least(2));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cabinet",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/tasteep/cabinet",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "cabinet"
+              ]
+            },
+            "description": "Tastings grouped by distillery with a per-group average score, most-stocked first. A null distillery is its own group."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('is an array of groups', () => { pm.expect(body).to.be.an('array'); body.forEach((g) => pm.expect(Object.keys(g).sort()).to.eql(['avg_score', 'count', 'distillery'])); });",
+                  "pm.test('sorted by count desc', () => { for (let i = 1; i < body.length; i++) pm.expect(body[i - 1].count).to.be.at.least(body[i].count); });",
+                  "const byName = Object.fromEntries(body.map((g) => [g.distillery, g]));",
+                  "pm.test('Lagavulin group reflects the updated score', () => { pm.expect(byName.Lagavulin).to.exist; pm.expect(byName.Lagavulin.count).to.be.at.least(1); pm.expect(byName.Lagavulin.avg_score).to.be.a('number'); });",
+                  "pm.test('Ardbeg group averages 70', () => { pm.expect(byName.Ardbeg).to.exist; pm.expect(byName.Ardbeg.avg_score).to.eql(70); });"
+                ]
+              }
+            }
+          ]
         }
-      ]
+      ],
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{tasteep_token}}",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Tasteep \u2014 Cleanup",
+      "description": "Removes the two tastings the run created so it can be repeated. Sign Out lives in the Auth folder on purpose: it revokes `tasteep_token`, so run it only when you are done.",
+      "item": [
+        {
+          "name": "Delete Tasting",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "tastings",
+                "{{tasting_id}}"
+              ]
+            },
+            "description": "204 on success, 404 if already deleted, never created, or owned by someone else."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete Second Tasting",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id_2}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "tastings",
+                "{{tasting_id_2}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Deleted Tasting (404 expected)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "tastings",
+                "{{tasting_id}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete Again (404 expected)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "tastings",
+                "{{tasting_id}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{tasteep_token}}",
+            "type": "string"
+          }
+        ]
+      }
     },
     {
       "name": "SMWS \u2014 Watchtower (public)",

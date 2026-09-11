@@ -194,8 +194,37 @@ Unit tests mock TypeORM repositories (`src/test-utils/mock-repository.factory.ts
 the OTP lifecycle, account resolution, session revocation, the tasting upsert and location
 rules, the stats/cabinet parsing, the geocode cache and the rate limiter.
 
-To exercise the real HTTP flow against a database, run Postgres in Docker and point the
-env at it; without SMTP configured the login code is printed in the server log:
+### End-to-end tests (need Postgres)
+
+```bash
+npm run test:e2e
+```
+
+`test/tasteep.e2e-spec.ts` boots the real app against the database in `.env` and drives the
+whole Tasteep contract over HTTP — JWT guard, validation pipe, list ordering, the unplaced
+shelf, stats/cabinet SQL, the manual-pin rules and the geocode cache. Only Nominatim is
+stubbed (its usage policy forbids automated querying). The suite creates throw-away users and
+deletes everything it made afterwards, so it is safe to run against a dev database. It sets
+`NODE_ENV=test`, which keeps schema sync on but turns TypeORM's SQL logging off.
+
+### Postman / newman
+
+`postman/Backend.postman_collection.json` + `postman/local.postman_environment.json`. The
+*Tasteep — Tastings → Atlas (phase 2) → Cleanup* folders are an ordered, fully asserted
+scenario (two tastings created, geocoded, pinned, aggregated, deleted). Run it headless against
+a running server with a token from the email login:
+
+```bash
+npm run start:dev                                  # in another shell; OTP is printed in its log
+curl -X POST localhost:3000/auth/email -H 'content-type: application/json' -d '{"email":"you@example.com"}'
+curl -X POST localhost:3000/auth/email/verify -H 'content-type: application/json' -d '{"email":"you@example.com","code":"123456"}'
+TASTEEP_TOKEN=<token from the response> npm run test:postman
+```
+
+The first run geocodes "Islay, Scotland" through Nominatim for real (needs
+`TASTEEP_NOMINATIM_USER_AGENT`); later runs are served from `tasteep_geocode_cache`.
+
+To exercise the flow by hand against a throw-away database instead:
 
 ```bash
 docker run -d --rm --name pg -e POSTGRES_PASSWORD=dev -p 5432:5432 postgres:16-alpine

@@ -135,6 +135,14 @@ All scoped to the authenticated user; other users' rows are invisible (404).
 | `exact` / `region` / `country` | Automated geocode result. `lat`/`lon` required. `409` if the tasting is already `manual`. |
 | `unknown` | Clears the location (`lat`/`lon` → `null`). Accepted even over a manual pin. |
 
+`400` when `precision` is missing/unknown, when `lat`/`lon` are out of range, or when they are
+absent for any precision other than `unknown`. The response is always the full updated `Tasting`.
+
+Typical Atlas flow: `POST /tasteep/geocode {query}` → `PUT …/location` with the `{lat, lon,
+precision}` it returned. The "NOT PLACED" shelf is `GET /tasteep/tastings?unplaced=true`
+(`unknown` → *set location*, `country` → *refine*); placing a tasting removes it from the shelf,
+clearing it puts it back.
+
 ---
 
 ## Aggregates (Profile / Atlas)
