@@ -65,7 +65,7 @@ export class TastingsController {
   }
 }
 
-/** Aggregates over the journal: Profile stat grid and the Atlas Cabinet view. */
+/** Aggregates over the journal: the Profile stat grid. */
 @Controller('tasteep')
 @UseGuards(TasteepJwtAuthGuard)
 export class TastingAggregatesController {
@@ -74,10 +74,5 @@ export class TastingAggregatesController {
   @Get('stats')
   stats(@Req() req: TasteepAuthRequest) {
     return this.tastings.stats(req.user.sub);
-  }
-
-  @Get('cabinet')
-  cabinet(@Req() req: TasteepAuthRequest) {
-    return this.tastings.cabinet(req.user.sub);
   }
 }

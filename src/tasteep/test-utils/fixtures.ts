@@ -1,6 +1,8 @@
 import { TasteepUser } from '../entities/tasteep-user.entity';
 import { TasteepSession } from '../entities/tasteep-session.entity';
 import { TasteepTasting } from '../entities/tasteep-tasting.entity';
+import { TasteepRegion } from '../entities/tasteep-region.entity';
+import { TasteepDistilleryLocation } from '../entities/tasteep-distillery-location.entity';
 import { UpsertTastingDto } from '../tastings/dto/upsert-tasting.dto';
 
 export const USER_ID = '11111111-1111-4111-8111-111111111111';
@@ -49,6 +51,8 @@ export const makeTasting = (
   photoPath: null,
   distillery: 'Lagavulin',
   region: 'Islay',
+  regionRef: null,
+  regionId: null,
   abv: 43,
   price: 65.5,
   ageStatement: '16',
@@ -77,6 +81,7 @@ export const makeUpsertDto = (
   photo_path: null,
   distillery: 'Lagavulin',
   region: 'Islay',
+  region_id: null,
   abv: 43,
   price: 65.5,
   age_statement: '16',
@@ -92,5 +97,59 @@ export const makeUpsertDto = (
   lat: null,
   lon: null,
   location_precision: 'unknown',
+  ...overrides,
+});
+
+export const makeRegion = (
+  overrides: Partial<TasteepRegion> = {},
+): TasteepRegion => ({
+  id: 'scotland/islay',
+  name: 'Islay',
+  parent: null,
+  parentId: 'scotland',
+  lat: 55.78,
+  lon: -6.25,
+  sortOrder: 1,
+  ...overrides,
+});
+
+/** A three-row slice of the real seed: one country with two subregions plus a childless country. */
+export const makeRegionRows = (): TasteepRegion[] => [
+  makeRegion({
+    id: 'scotland',
+    name: 'Scotland',
+    parentId: null,
+    lat: 56.49,
+    lon: -4.2,
+    sortOrder: 0,
+  }),
+  makeRegion({
+    id: 'scotland/speyside',
+    name: 'Speyside',
+    lat: 57.45,
+    lon: -3.15,
+    sortOrder: 0,
+  }),
+  makeRegion(),
+  makeRegion({
+    id: 'sweden',
+    name: 'Sweden',
+    parentId: null,
+    lat: 62,
+    lon: 15,
+    sortOrder: 1,
+  }),
+];
+
+export const makeDistilleryLocation = (
+  overrides: Partial<TasteepDistilleryLocation> = {},
+): TasteepDistilleryLocation => ({
+  id: 'ardbeg',
+  name: 'Ardbeg',
+  lat: 55.6418579,
+  lon: -6.1111707,
+  precision: 'exact',
+  createdAt: new Date('2024-01-01'),
+  updatedAt: new Date('2024-01-01'),
   ...overrides,
 });

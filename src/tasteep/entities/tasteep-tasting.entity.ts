@@ -10,6 +10,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { TasteepUser } from './tasteep-user.entity';
+import { TasteepRegion } from './tasteep-region.entity';
 
 export const TASTING_CATEGORIES = ['whisky', 'rum', 'agave', 'other'] as const;
 export type TastingCategory = (typeof TASTING_CATEGORIES)[number];
@@ -76,8 +77,22 @@ export class TasteepTasting {
   @Column({ type: 'text', nullable: true })
   distillery: string | null;
 
+  /** Free text, always kept verbatim — the user may type anything here. */
   @Column({ type: 'text', nullable: true })
   region: string | null;
+
+  /**
+   * Optional link to the curated picker (`tasteep_regions`). Set when the
+   * client picked an entry, or when `region` text matched one by name. The
+   * Atlas falls back to that region's centroid when the tasting itself has
+   * no coordinates.
+   */
+  @ManyToOne(() => TasteepRegion, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'region_id' })
+  regionRef: TasteepRegion | null;
+
+  @Column({ name: 'region_id', type: 'text', nullable: true })
+  regionId: string | null;
 
   @Column({ type: 'numeric', nullable: true, transformer: numericTransformer })
   abv: number | null;

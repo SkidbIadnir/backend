@@ -21,14 +21,11 @@ describe('Tasteep tastings controllers', () => {
       upsert: jest.fn(),
       remove: jest.fn(),
       updateLocation: jest.fn(),
-      stats: jest
-        .fn()
-        .mockResolvedValue({
-          count: 0,
-          avg_score: null,
-          distinct_distilleries: 0,
-        }),
-      cabinet: jest.fn().mockResolvedValue([]),
+      stats: jest.fn().mockResolvedValue({
+        count: 0,
+        avg_score: null,
+        distinct_distilleries: 0,
+      }),
     };
     const module = await Test.createTestingModule({
       controllers: [TastingsController, TastingAggregatesController],
@@ -70,10 +67,8 @@ describe('Tasteep tastings controllers', () => {
     });
   });
 
-  it('exposes stats and cabinet under /tasteep', async () => {
+  it('exposes stats under /tasteep', async () => {
     await aggregates.stats(req);
-    await aggregates.cabinet(req);
     expect(service.stats).toHaveBeenCalledWith(USER_ID);
-    expect(service.cabinet).toHaveBeenCalledWith(USER_ID);
   });
 });

@@ -297,7 +297,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status is 200', () => pm.response.to.have.status(200));",
-                  "const TASTING_KEYS = [\"id\", \"name\", \"category\", \"photo_path\", \"distillery\", \"region\", \"abv\", \"price\", \"age_statement\", \"cask_type\", \"date_tasted\", \"location\", \"score\", \"appearance\", \"tags\", \"nose\", \"palate\", \"finish\", \"lat\", \"lon\", \"location_precision\", \"created_at\", \"updated_at\"];",
+                  "const TASTING_KEYS = [\"id\", \"name\", \"category\", \"photo_path\", \"distillery\", \"region\", \"region_id\", \"abv\", \"price\", \"age_statement\", \"cask_type\", \"date_tasted\", \"location\", \"score\", \"appearance\", \"tags\", \"nose\", \"palate\", \"finish\", \"lat\", \"lon\", \"location_precision\", \"created_at\", \"updated_at\"];",
                   "const expectTastingShape = (t) => pm.expect(Object.keys(t).sort()).to.eql([...TASTING_KEYS].sort());",
                   "const body = pm.response.json();",
                   "pm.test('is a plain array (no envelope)', () => pm.expect(body).to.be.an('array'));",
@@ -338,7 +338,7 @@
             "description": "PUT is upsert. `:id` must be a UUID \u2014 the pre-request script generates `tasting_id` if the environment has none. Full replacement: any field you omit is stored as null.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Lagavulin 16\",\n  \"category\": \"whisky\",\n  \"photo_path\": null,\n  \"distillery\": \"Lagavulin\",\n  \"region\": \"Islay\",\n  \"abv\": 43,\n  \"price\": 65.5,\n  \"age_statement\": \"16\",\n  \"cask_type\": \"Ex-bourbon & sherry\",\n  \"date_tasted\": \"2026-03-10T19:00:00.000Z\",\n  \"location\": \"Home\",\n  \"score\": 88,\n  \"appearance\": \"Deep amber\",\n  \"tags\": [\n    \"peat\",\n    \"smoke\"\n  ],\n  \"nose\": \"Bonfire\",\n  \"palate\": \"Iodine\",\n  \"finish\": \"Long\",\n  \"lat\": null,\n  \"lon\": null,\n  \"location_precision\": \"unknown\"\n}",
+              "raw": "{\n  \"name\": \"Lagavulin 16\",\n  \"category\": \"whisky\",\n  \"photo_path\": null,\n  \"distillery\": \"Lagavulin\",\n  \"region\": \"Islay\",\n  \"region_id\": null,\n  \"abv\": 43,\n  \"price\": 65.5,\n  \"age_statement\": \"16\",\n  \"cask_type\": \"Ex-bourbon & sherry\",\n  \"date_tasted\": \"2026-03-10T19:00:00.000Z\",\n  \"location\": \"Home\",\n  \"score\": 88,\n  \"appearance\": \"Deep amber\",\n  \"tags\": [\n    \"peat\",\n    \"smoke\"\n  ],\n  \"nose\": \"Bonfire\",\n  \"palate\": \"Iodine\",\n  \"finish\": \"Long\",\n  \"lat\": null,\n  \"lon\": null,\n  \"location_precision\": \"unknown\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -363,7 +363,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status is 200', () => pm.response.to.have.status(200));",
-                  "const TASTING_KEYS = [\"id\", \"name\", \"category\", \"photo_path\", \"distillery\", \"region\", \"abv\", \"price\", \"age_statement\", \"cask_type\", \"date_tasted\", \"location\", \"score\", \"appearance\", \"tags\", \"nose\", \"palate\", \"finish\", \"lat\", \"lon\", \"location_precision\", \"created_at\", \"updated_at\"];",
+                  "const TASTING_KEYS = [\"id\", \"name\", \"category\", \"photo_path\", \"distillery\", \"region\", \"region_id\", \"abv\", \"price\", \"age_statement\", \"cask_type\", \"date_tasted\", \"location\", \"score\", \"appearance\", \"tags\", \"nose\", \"palate\", \"finish\", \"lat\", \"lon\", \"location_precision\", \"created_at\", \"updated_at\"];",
                   "const expectTastingShape = (t) => pm.expect(Object.keys(t).sort()).to.eql([...TASTING_KEYS].sort());",
                   "const body = pm.response.json();",
                   "pm.test('id matches the URL', () => pm.expect(body.id).to.eql(pm.environment.get('tasting_id')));",
@@ -398,10 +398,10 @@
                 "{{tasting_id_2}}"
               ]
             },
-            "description": "A second entry (different distillery, older date, `country` precision with coordinates) so the list order, the unplaced shelf, stats and cabinet have something to show.",
+            "description": "A second entry (different distillery, older date, `country` precision with coordinates) so the list order, the unplaced shelf and stats have something to show.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Ardbeg 10\",\n  \"category\": \"whisky\",\n  \"photo_path\": null,\n  \"distillery\": \"Ardbeg\",\n  \"region\": \"Islay\",\n  \"abv\": 46,\n  \"price\": 48,\n  \"age_statement\": \"10\",\n  \"cask_type\": null,\n  \"date_tasted\": \"2025-12-25T18:00:00.000Z\",\n  \"location\": \"Home\",\n  \"score\": 70,\n  \"appearance\": \"Deep amber\",\n  \"tags\": [\n    \"peat\",\n    \"citrus\"\n  ],\n  \"nose\": \"Lime & tar\",\n  \"palate\": \"Ash\",\n  \"finish\": \"Medium\",\n  \"lat\": 56.49,\n  \"lon\": -4.2,\n  \"location_precision\": \"country\"\n}",
+              "raw": "{\n  \"name\": \"Ardbeg 10\",\n  \"category\": \"whisky\",\n  \"photo_path\": null,\n  \"distillery\": \"Ardbeg\",\n  \"region\": \"Islay\",\n  \"region_id\": null,\n  \"abv\": 46,\n  \"price\": 48,\n  \"age_statement\": \"10\",\n  \"cask_type\": null,\n  \"date_tasted\": \"2025-12-25T18:00:00.000Z\",\n  \"location\": \"Home\",\n  \"score\": 70,\n  \"appearance\": \"Deep amber\",\n  \"tags\": [\n    \"peat\",\n    \"citrus\"\n  ],\n  \"nose\": \"Lime & tar\",\n  \"palate\": \"Ash\",\n  \"finish\": \"Medium\",\n  \"lat\": 56.49,\n  \"lon\": -4.2,\n  \"location_precision\": \"country\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -460,7 +460,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status is 200', () => pm.response.to.have.status(200));",
-                  "const TASTING_KEYS = [\"id\", \"name\", \"category\", \"photo_path\", \"distillery\", \"region\", \"abv\", \"price\", \"age_statement\", \"cask_type\", \"date_tasted\", \"location\", \"score\", \"appearance\", \"tags\", \"nose\", \"palate\", \"finish\", \"lat\", \"lon\", \"location_precision\", \"created_at\", \"updated_at\"];",
+                  "const TASTING_KEYS = [\"id\", \"name\", \"category\", \"photo_path\", \"distillery\", \"region\", \"region_id\", \"abv\", \"price\", \"age_statement\", \"cask_type\", \"date_tasted\", \"location\", \"score\", \"appearance\", \"tags\", \"nose\", \"palate\", \"finish\", \"lat\", \"lon\", \"location_precision\", \"created_at\", \"updated_at\"];",
                   "const expectTastingShape = (t) => pm.expect(Object.keys(t).sort()).to.eql([...TASTING_KEYS].sort());",
                   "const body = pm.response.json();",
                   "pm.test('is the created tasting', () => { pm.expect(body.id).to.eql(pm.environment.get('tasting_id')); pm.expect(body.name).to.eql('Lagavulin 16'); });",
@@ -581,7 +581,7 @@
     },
     {
       "name": "Tasteep \u2014 Atlas (phase 2)",
-      "description": "The Places / Cabinet backend: geocoding via Nominatim (cache-first, 1 req/s server-wide), the per-tasting location route with its manual-pin protection, the \"NOT PLACED\" shelf, and the stats / cabinet aggregates. Runs after the Tastings folder; expects `tasting_id` and `tasting_id_2` to exist.",
+      "description": "The Places backend: geocoding via Nominatim (cache-first, 1 req/s server-wide), the per-tasting location route with its manual-pin protection, the \"NOT PLACED\" shelf, and the stats aggregate. Runs after the Tastings folder; expects `tasting_id` and `tasting_id_2` to exist.",
       "item": [
         {
           "name": "List Unplaced Tastings",
@@ -865,7 +865,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status is 200', () => pm.response.to.have.status(200));",
-                  "const TASTING_KEYS = [\"id\", \"name\", \"category\", \"photo_path\", \"distillery\", \"region\", \"abv\", \"price\", \"age_statement\", \"cask_type\", \"date_tasted\", \"location\", \"score\", \"appearance\", \"tags\", \"nose\", \"palate\", \"finish\", \"lat\", \"lon\", \"location_precision\", \"created_at\", \"updated_at\"];",
+                  "const TASTING_KEYS = [\"id\", \"name\", \"category\", \"photo_path\", \"distillery\", \"region\", \"region_id\", \"abv\", \"price\", \"age_statement\", \"cask_type\", \"date_tasted\", \"location\", \"score\", \"appearance\", \"tags\", \"nose\", \"palate\", \"finish\", \"lat\", \"lon\", \"location_precision\", \"created_at\", \"updated_at\"];",
                   "const expectTastingShape = (t) => pm.expect(Object.keys(t).sort()).to.eql([...TASTING_KEYS].sort());",
                   "const body = pm.response.json();",
                   "pm.test('returns the full updated tasting', () => expectTastingShape(body));",
@@ -1247,6 +1247,175 @@
           ]
         },
         {
+          "name": "List Regions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/tasteep/regions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "regions"
+              ]
+            },
+            "description": "The curated region picker: countries in seed order, each with `subregions` (may be empty). Every row carries an approximate centroid `lat`/`lon` \u2014 the Atlas uses it as the fallback pin for a tasting that has no resolved location. Send the returned `ETag` back as `If-None-Match` to get a bodyless `304`. Stores the Islay id in `region_id` for the next request."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const tree = pm.response.json();",
+                  "pm.test('is a non-empty array', () => { pm.expect(tree).to.be.an('array'); pm.expect(tree.length).to.be.at.least(30); });",
+                  "pm.test('country rows have the exact shape', () => pm.expect(Object.keys(tree[0]).sort()).to.eql(['id', 'lat', 'lon', 'name', 'subregions']));",
+                  "const scotland = tree.find((r) => r.id === 'scotland');",
+                  "pm.test('Scotland is there with its whisky regions', () => { pm.expect(scotland.name).to.eql('Scotland'); pm.expect(scotland.subregions.map((s) => s.id)).to.include.members(['scotland/speyside', 'scotland/islay', 'scotland/campbeltown']); });",
+                  "const islay = scotland.subregions.find((s) => s.id === 'scotland/islay');",
+                  "pm.test('subregion rows have the exact shape and a centroid', () => { pm.expect(Object.keys(islay).sort()).to.eql(['id', 'lat', 'lon', 'name']); pm.expect(islay.lat).to.be.a('number'); pm.expect(islay.lon).to.be.a('number'); });",
+                  "pm.test('a country without subregions has an empty list', () => pm.expect(tree.find((r) => r.id === 'sweden').subregions).to.eql([]));",
+                  "pm.test('carries a weak ETag', () => pm.expect(pm.response.headers.get('ETag')).to.match(/^W\\/\"[0-9a-f]{40}\"$/));",
+                  "pm.environment.set('region_id', islay.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Regions (304 on If-None-Match)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "If-None-Match",
+                "value": "{{regions_etag}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/tasteep/regions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "regions"
+              ]
+            },
+            "description": "Same call with the ETag from the previous request; expects `304` and no body."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Newman runs requests in order; grab the ETag with a direct call so this request is self-contained.",
+                  "pm.sendRequest({ url: pm.variables.replaceIn('{{base_url}}/tasteep/regions'), method: 'GET', header: { Authorization: 'Bearer ' + pm.environment.get('tasteep_token') } }, (err, res) => { if (!err) pm.environment.set('regions_etag', res.headers.get('ETag')); });"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 304', () => pm.response.to.have.status(304));",
+                  "pm.test('no body', () => pm.expect(pm.response.text()).to.eql(''));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Upsert With Picked Region",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id_2}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "tastings",
+                "{{tasting_id_2}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Ardbeg 10\",\n  \"category\": \"whisky\",\n  \"photo_path\": null,\n  \"distillery\": \"Ardbeg\",\n  \"region\": null,\n  \"region_id\": \"{{region_id}}\",\n  \"abv\": 46,\n  \"price\": 48,\n  \"age_statement\": \"10\",\n  \"cask_type\": null,\n  \"date_tasted\": \"2025-12-25T18:00:00.000Z\",\n  \"location\": null,\n  \"score\": 70,\n  \"appearance\": null,\n  \"tags\": [\n    \"peat\"\n  ],\n  \"nose\": null,\n  \"palate\": null,\n  \"finish\": null,\n  \"lat\": null,\n  \"lon\": null,\n  \"location_precision\": \"unknown\"\n}"
+            },
+            "description": "`region_id` from the picker wins and, with `region` left null, the server fills the text with the region's name. An unknown `region_id` is a `400`. Free text that matches a known name (e.g. `\"Islay\"`) is linked automatically; anything else is kept as typed with `region_id: null`."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('region_id stored', () => pm.expect(body.region_id).to.eql(pm.environment.get('region_id')));",
+                  "pm.test('region text filled from the picker', () => pm.expect(body.region).to.eql('Islay'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Upsert With Unknown region_id (400 expected)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/tasteep/tastings/{{tasting_id_2}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "tastings",
+                "{{tasting_id_2}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Ardbeg 10\",\n  \"region_id\": \"atlantis\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('names the field', () => pm.expect(JSON.stringify(pm.response.json().message)).to.include('region_id'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Stats",
           "request": {
             "method": "GET",
@@ -1276,42 +1445,6 @@
                   "pm.test('counts both fresh tastings', () => pm.expect(body.count).to.be.at.least(2));",
                   "pm.test('avg_score is a 1-decimal number between 0 and 100', () => { pm.expect(body.avg_score).to.be.a('number'); pm.expect(body.avg_score).to.be.within(0, 100); pm.expect(Math.round(body.avg_score * 10) / 10).to.eql(body.avg_score); });",
                   "pm.test('at least Lagavulin and Ardbeg', () => pm.expect(body.distinct_distilleries).to.be.at.least(2));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Cabinet",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/tasteep/cabinet",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "tasteep",
-                "cabinet"
-              ]
-            },
-            "description": "Tastings grouped by distillery with a per-group average score, most-stocked first. A null distillery is its own group."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
-                  "const body = pm.response.json();",
-                  "pm.test('is an array of groups', () => { pm.expect(body).to.be.an('array'); body.forEach((g) => pm.expect(Object.keys(g).sort()).to.eql(['avg_score', 'count', 'distillery'])); });",
-                  "pm.test('sorted by count desc', () => { for (let i = 1; i < body.length; i++) pm.expect(body[i - 1].count).to.be.at.least(body[i].count); });",
-                  "const byName = Object.fromEntries(body.map((g) => [g.distillery, g]));",
-                  "pm.test('Lagavulin group reflects the updated score', () => { pm.expect(byName.Lagavulin).to.exist; pm.expect(byName.Lagavulin.count).to.be.at.least(1); pm.expect(byName.Lagavulin.avg_score).to.be.a('number'); });",
-                  "pm.test('Ardbeg group averages 70', () => { pm.expect(byName.Ardbeg).to.exist; pm.expect(byName.Ardbeg.avg_score).to.eql(70); });"
                 ]
               }
             }

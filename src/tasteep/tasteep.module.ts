@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TasteepAuthModule } from './auth/tasteep-auth.module';
 import { TastingsModule } from './tastings/tastings.module';
 import { GeocodeModule } from './geocode/geocode.module';
+import { RegionsModule } from './regions/regions.module';
 
 /**
  * Tasteep — the spirit-tasting journal behind the Flutter app.
@@ -10,6 +11,6 @@ import { GeocodeModule } from './geocode/geocode.module';
  * `tasteep`, routes `/auth/*` and `/tasteep/*`. Shares nothing with SMWS.
  */
 @Module({
-  imports: [TasteepAuthModule, TastingsModule, GeocodeModule],
+  imports: [TasteepAuthModule, RegionsModule, TastingsModule, GeocodeModule],
 })
 export class TasteepModule {}

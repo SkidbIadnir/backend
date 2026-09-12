@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { In } from 'typeorm';
 import { TastingsService } from './tastings.service';
+import { RegionsService } from '../regions/regions.service';
 import { TasteepTasting } from '../entities/tasteep-tasting.entity';
 import {
   createMockQueryBuilder,
@@ -14,6 +15,7 @@ import {
   MockRepository,
 } from '../../test-utils/mock-repository.factory';
 import {
+  makeRegion,
   makeTasting,
   makeUpsertDto,
   OTHER_USER_ID,
@@ -24,13 +26,16 @@ import {
 describe('TastingsService', () => {
   let service: TastingsService;
   let repo: MockRepository<TasteepTasting>;
+  const regions = { resolve: jest.fn() };
 
   beforeEach(async () => {
     repo = createMockRepository<TasteepTasting>();
+    regions.resolve.mockReset().mockResolvedValue(null);
     const module = await Test.createTestingModule({
       providers: [
         TastingsService,
         { provide: getRepositoryToken(TasteepTasting), useValue: repo },
+        { provide: RegionsService, useValue: regions },
       ],
     }).compile();
     service = module.get(TastingsService);
@@ -131,6 +136,73 @@ describe('TastingsService', () => {
         lon: -6.1,
         locationPrecision: 'manual',
       });
+    });
+
+    it('links the region the text or id resolves to, keeping the typed text', async () => {
+      repo
+        .findOne!.mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(makeTasting());
+      repo.save!.mockImplementation(async (t: TasteepTasting) => t);
+      regions.resolve.mockResolvedValue(makeRegion());
+
+      await service.upsert(
+        USER_ID,
+        TASTING_ID,
+        makeUpsertDto({ region: 'islay, scotland', region_id: null }),
+      );
+
+      expect(regions.resolve).toHaveBeenCalledWith(null, 'islay, scotland');
+      expect(repo.save!.mock.calls[0][0]).toMatchObject({
+        region: 'islay, scotland',
+        regionId: 'scotland/islay',
+      });
+    });
+
+    it('fills the region text from the picked region when the text is empty', async () => {
+      repo
+        .findOne!.mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(makeTasting());
+      repo.save!.mockImplementation(async (t: TasteepTasting) => t);
+      regions.resolve.mockResolvedValue(makeRegion());
+
+      await service.upsert(
+        USER_ID,
+        TASTING_ID,
+        makeUpsertDto({ region: null, region_id: 'scotland/islay' }),
+      );
+
+      expect(regions.resolve).toHaveBeenCalledWith('scotland/islay', null);
+      expect(repo.save!.mock.calls[0][0]).toMatchObject({
+        region: 'Islay',
+        regionId: 'scotland/islay',
+      });
+    });
+
+    it('stores a null link when nothing resolves, without touching the text', async () => {
+      repo
+        .findOne!.mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(makeTasting());
+      repo.save!.mockImplementation(async (t: TasteepTasting) => t);
+
+      await service.upsert(
+        USER_ID,
+        TASTING_ID,
+        makeUpsertDto({ region: "Grandma's cellar" }),
+      );
+
+      expect(repo.save!.mock.calls[0][0]).toMatchObject({
+        region: "Grandma's cellar",
+        regionId: null,
+      });
+    });
+
+    it('propagates a 400 for an unknown region_id and saves nothing', async () => {
+      repo.findOne!.mockResolvedValueOnce(null);
+      regions.resolve.mockRejectedValue(new BadRequestException('nope'));
+      await expect(
+        service.upsert(USER_ID, TASTING_ID, makeUpsertDto({ region_id: 'x' })),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(repo.save).not.toHaveBeenCalled();
     });
 
     it('lets the client move a manual pin with another manual value', async () => {
@@ -279,21 +351,6 @@ describe('TastingsService', () => {
         avg_score: null,
         distinct_distilleries: 0,
       });
-    });
-  });
-
-  describe('cabinet', () => {
-    it('groups by distillery and keeps a null group', async () => {
-      repo.createQueryBuilder!.mockReturnValue(
-        createMockQueryBuilder(undefined, [
-          { distillery: 'Lagavulin', count: '3', avg_score: '88.25' },
-          { distillery: null, count: '1', avg_score: null },
-        ]),
-      );
-      expect(await service.cabinet(USER_ID)).toEqual([
-        { distillery: 'Lagavulin', count: 3, avg_score: 88.3 },
-        { distillery: null, count: 1, avg_score: null },
-      ]);
     });
   });
 });

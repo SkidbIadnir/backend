@@ -19,6 +19,7 @@ describe('tasting.mapper', () => {
           'photo_path',
           'distillery',
           'region',
+          'region_id',
           'abv',
           'price',
           'age_statement',

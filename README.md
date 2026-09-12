@@ -23,7 +23,7 @@ src/
 │   ├── tasteep.module.ts
 │   ├── tasteep-config.ts    every TASTEEP_* env var in one place
 │   ├── entities/            tasteep_users, tasteep_sessions, tasteep_email_otps,
-│   │                        tasteep_tastings, tasteep_geocode_cache
+│   │                        tasteep_tastings, tasteep_geocode_cache, tasteep_regions
 │   ├── auth/                /auth/* — email OTP, Google ID token, Discord code, sessions
 │   │   ├── tasteep-auth.controller.ts / .service.ts / .module.ts
 │   │   ├── otp.service.ts               issue/verify 6-digit codes (HMAC, TTL, attempts, cooldown)
@@ -34,11 +34,12 @@ src/
 │   │   ├── auth-user.ts                 AuthUser JSON mapper
 │   │   └── dto/
 │   ├── mail/                nodemailer SMTP transport (logs the code when SMTP is unset)
-│   ├── tastings/            /tasteep/tastings, /tasteep/stats, /tasteep/cabinet
+│   ├── tastings/            /tasteep/tastings, /tasteep/stats
 │   │   ├── tastings.controller.ts / .service.ts / .module.ts
 │   │   ├── tasting.mapper.ts            entity ⇄ snake_case JSON contract
 │   │   └── dto/
 │   ├── geocode/             /tasteep/geocode — cache-first Nominatim with a 1 req/s limiter
+│   ├── regions/             /tasteep/regions — curated country/subregion picker, seeded from data/region.json
 │   └── test-utils/          Tasteep fixtures
 │
 └── smws/
@@ -104,8 +105,8 @@ check constraints on `category`, `location_precision`, `score`, indexes on
 | `DELETE` | `/tasteep/tastings/:id` | Delete |
 | `PUT` | `/tasteep/tastings/:id/location` | Manual pin / geocode result / clear |
 | `GET` | `/tasteep/stats` | `{count, avg_score, distinct_distilleries}` |
-| `GET` | `/tasteep/cabinet` | Per-distillery `{distillery, count, avg_score}` |
 | `POST` | `/tasteep/geocode` | `{query}` → `{lat, lon, precision}` |
+| `GET` | `/tasteep/regions` | Country → subregion tree with centroids, ETag/304 |
 
 Request/response details, status codes and the location-precision rules are in
 [docs/tasteep-api.md](./docs/tasteep-api.md).
@@ -192,7 +193,7 @@ npm run build
 
 Unit tests mock TypeORM repositories (`src/test-utils/mock-repository.factory.ts`) and cover
 the OTP lifecycle, account resolution, session revocation, the tasting upsert and location
-rules, the stats/cabinet parsing, the geocode cache and the rate limiter.
+rules, the stats parsing, the geocode cache and the rate limiter.
 
 ### End-to-end tests (need Postgres)
 
@@ -202,7 +203,7 @@ npm run test:e2e
 
 `test/tasteep.e2e-spec.ts` boots the real app against the database in `.env` and drives the
 whole Tasteep contract over HTTP — JWT guard, validation pipe, list ordering, the unplaced
-shelf, stats/cabinet SQL, the manual-pin rules and the geocode cache. Only Nominatim is
+shelf, stats SQL, the manual-pin rules and the geocode cache. Only Nominatim is
 stubbed (its usage policy forbids automated querying). The suite creates throw-away users and
 deletes everything it made afterwards, so it is safe to run against a dev database. It sets
 `NODE_ENV=test`, which keeps schema sync on but turns TypeORM's SQL logging off.

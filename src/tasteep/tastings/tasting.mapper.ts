@@ -9,6 +9,7 @@ export interface TastingJson {
   photo_path: string | null;
   distillery: string | null;
   region: string | null;
+  region_id: string | null;
   abv: number | null;
   price: number | null;
   age_statement: string | null;
@@ -39,6 +40,7 @@ export function toTastingJson(t: TasteepTasting): TastingJson {
     photo_path: t.photoPath ?? null,
     distillery: t.distillery ?? null,
     region: t.region ?? null,
+    region_id: t.regionId ?? null,
     abv: t.abv ?? null,
     price: t.price ?? null,
     age_statement: t.ageStatement ?? null,
@@ -73,6 +75,7 @@ export function applyUpsertDto(
   target.photoPath = dto.photo_path ?? null;
   target.distillery = dto.distillery ?? null;
   target.region = dto.region ?? null;
+  target.regionId = dto.region_id ?? null;
   target.abv = dto.abv ?? null;
   target.price = dto.price ?? null;
   target.ageStatement = dto.age_statement ?? null;

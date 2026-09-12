@@ -16,6 +16,7 @@ import { TasteepUser } from '../src/tasteep/entities/tasteep-user.entity';
 import { NominatimClient } from '../src/tasteep/geocode/nominatim.client';
 import type { GeocodeHit } from '../src/tasteep/geocode/nominatim.client';
 import type { TastingJson } from '../src/tasteep/tastings/tasting.mapper';
+import type { RegionJson } from '../src/tasteep/regions/regions.service';
 
 /**
  * Phase 2 (Atlas) contract, end to end: real Nest app, real Postgres (the one
@@ -42,6 +43,7 @@ const TASTING_KEYS = [
   'photo_path',
   'distillery',
   'region',
+  'region_id',
   'abv',
   'price',
   'age_statement',
@@ -96,6 +98,7 @@ describe('Tasteep phase 2 — Atlas (e2e)', () => {
     photo_path: null,
     distillery: 'Lagavulin',
     region: 'Islay',
+    region_id: null,
     abv: 43,
     price: 65.5,
     age_statement: '16',
@@ -181,7 +184,6 @@ describe('Tasteep phase 2 — Atlas (e2e)', () => {
       ['get', '/tasteep/tastings'],
       ['get', '/tasteep/tastings?unplaced=true'],
       ['get', '/tasteep/stats'],
-      ['get', '/tasteep/cabinet'],
       ['post', '/tasteep/geocode'],
     ] as const)('%s %s → 401 without a bearer token', async (method, url) => {
       await request(http)[method](url).expect(401);
@@ -225,6 +227,8 @@ describe('Tasteep phase 2 — Atlas (e2e)', () => {
         lat: null,
         lon: null,
         location_precision: 'unknown',
+        region: 'Islay',
+        region_id: 'scotland/islay', // free text matched the seeded picker entry
       });
       expect(typeof tasting(res).created_at).toBe('string');
 
@@ -393,20 +397,6 @@ describe('Tasteep phase 2 — Atlas (e2e)', () => {
         distinct_distilleries: 0,
       });
       await users.delete({ id: nobody.id });
-    });
-  });
-
-  describe('GET /tasteep/cabinet', () => {
-    it('groups by distillery, most-stocked first, null group last', async () => {
-      const res = await request(http)
-        .get('/tasteep/cabinet')
-        .set(auth(alice.token))
-        .expect(200);
-      expect(res.body).toEqual([
-        { distillery: 'Lagavulin', count: 2, avg_score: 89 },
-        { distillery: 'Ardbeg', count: 1, avg_score: 70 },
-        { distillery: null, count: 1, avg_score: null },
-      ]);
     });
   });
 
@@ -624,6 +614,107 @@ describe('Tasteep phase 2 — Atlas (e2e)', () => {
     });
   });
 
+  describe('GET /tasteep/regions + region linking', () => {
+    const t5 = randomUUID();
+    const regionList = (res: request.Response) => res.body as RegionJson[];
+
+    // t5 must not leak into the stats assertions of the DELETE block below.
+    afterAll(() => tastings.delete({ id: t5 }));
+
+    it('requires auth', async () => {
+      await request(http).get('/tasteep/regions').expect(401);
+    });
+
+    it('returns the seeded two-level tree with centroids and an ETag', async () => {
+      const res = await request(http)
+        .get('/tasteep/regions')
+        .set(auth(alice.token))
+        .expect(200);
+      const tree = regionList(res);
+
+      expect(tree.length).toBeGreaterThanOrEqual(30);
+      expect(tree[0]).toMatchObject({ id: 'scotland', name: 'Scotland' });
+      const scotland = tree[0];
+      expect(scotland.subregions.map((s) => s.id)).toEqual(
+        expect.arrayContaining([
+          'scotland/speyside',
+          'scotland/islay',
+          'scotland/campbeltown',
+        ]),
+      );
+      const islay = scotland.subregions.find((s) => s.id === 'scotland/islay');
+      expect(islay).toEqual({
+        id: 'scotland/islay',
+        name: 'Islay',
+        lat: 55.78,
+        lon: -6.25,
+      });
+      const sweden = tree.find((r) => r.id === 'sweden');
+      expect(sweden?.subregions).toEqual([]);
+
+      const etag = res.headers.etag;
+      expect(etag).toMatch(/^W\/"[0-9a-f]{40}"$/);
+      const again = await request(http)
+        .get('/tasteep/regions')
+        .set(auth(alice.token))
+        .set('If-None-Match', etag)
+        .expect(304);
+      expect(again.body).toEqual({});
+    });
+
+    it('a picked region_id is stored and fills an empty region text', async () => {
+      const res = await request(http)
+        .put(`/tasteep/tastings/${t5}`)
+        .set(auth(alice.token))
+        .send(
+          body({
+            name: 'Kavalan Classic',
+            distillery: 'Kavalan',
+            region: null,
+            region_id: 'taiwan/yilan',
+          }),
+        )
+        .expect(200);
+      expect(tasting(res)).toMatchObject({
+        region: 'Yilan',
+        region_id: 'taiwan/yilan',
+      });
+    });
+
+    it('free text that matches nothing keeps the text and no link', async () => {
+      const res = await request(http)
+        .put(`/tasteep/tastings/${t5}`)
+        .set(auth(alice.token))
+        .send(body({ name: 'Kavalan Classic', region: "Grandma's cellar" }))
+        .expect(200);
+      expect(tasting(res)).toMatchObject({
+        region: "Grandma's cellar",
+        region_id: null,
+      });
+    });
+
+    it('free text naming country and subregion links the subregion', async () => {
+      const res = await request(http)
+        .put(`/tasteep/tastings/${t5}`)
+        .set(auth(alice.token))
+        .send(body({ name: 'Kavalan Classic', region: 'Scotland / Speyside' }))
+        .expect(200);
+      expect(tasting(res)).toMatchObject({
+        region: 'Scotland / Speyside',
+        region_id: 'scotland/speyside',
+      });
+    });
+
+    it('400s on an unknown region_id', async () => {
+      const res = await request(http)
+        .put(`/tasteep/tastings/${t5}`)
+        .set(auth(alice.token))
+        .send(body({ region_id: 'atlantis' }))
+        .expect(400);
+      expect(errorMessage(res)).toMatch(/region_id/);
+    });
+  });
+
   describe('DELETE /tasteep/tastings/:id', () => {
     it("404s on another user's tasting, 204 on mine, and stats follow", async () => {
       await request(http)
@@ -652,11 +743,6 @@ describe('Tasteep phase 2 — Atlas (e2e)', () => {
         avg_score: 82.7,
         distinct_distilleries: 2,
       });
-      const cabinet = await request(http)
-        .get('/tasteep/cabinet')
-        .set(auth(alice.token))
-        .expect(200);
-      expect(cabinet.body as unknown[]).toHaveLength(2);
     });
   });
 });

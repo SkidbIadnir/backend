@@ -34,7 +34,8 @@ Exactly `lib/models/tasting.dart`. Every field except `id`, `name`, `category`, 
   "category": "whisky",                  // "whisky" | "rum" | "agave" | "other"
   "photo_path": "/data/user/0/…/a.jpg",  // opaque client-side path, stored & echoed as-is
   "distillery": "Lagavulin",
-  "region": "Islay",
+  "region": "Islay",                     // free text, kept verbatim
+  "region_id": "scotland/islay",         // link into GET /tasteep/regions, or null
   "abv": 43,
   "price": 65.5,
   "age_statement": "16",
@@ -126,6 +127,15 @@ All scoped to the authenticated user; other users' rows are invisible (404).
 - A row whose `location_precision` is `manual` keeps its pin: if the body carries an
   automated precision (`exact`/`region`/`country`), the stored `lat`/`lon`/`manual` win.
   Sending `"manual"` with new coordinates moves the pin.
+- **Region.** `region` is free text and is never altered. `region_id` links the tasting to
+  the picker (see [Regions](#regions)):
+  - `region_id` set → it must exist (`400 Unknown region_id "…"` otherwise). If `region` is
+    null/empty the server fills it with that region's name.
+  - `region_id` null → the server tries to match `region` by name, case-insensitively,
+    whole string first and then each `,`/`/`-separated part; a subregion beats its
+    country (`"Islay"`, `"Islay, Scotland"` and `"Scotland / Speyside"` all link). A few
+    aliases are known (`Highlands`, `Lowlands`, `USA`). No match → `region_id: null`,
+    text untouched. Typing anything is always allowed.
 
 ### `PUT /tasteep/tastings/:id/location`
 
@@ -145,12 +155,45 @@ clearing it puts it back.
 
 ---
 
-## Aggregates (Profile / Atlas)
+## Aggregates (Profile)
 
 | Method | Path | Response |
 |---|---|---|
 | `GET` | `/tasteep/stats` | `{"count": 12, "avg_score": 84.7, "distinct_distilleries": 7}` — `avg_score` is `null` when no scored tasting exists |
-| `GET` | `/tasteep/cabinet` | `[{"distillery": "Lagavulin", "count": 3, "avg_score": 88.3}, {"distillery": null, "count": 1, "avg_score": null}]` sorted by count desc |
+
+---
+
+## Regions
+
+`GET /tasteep/regions` → the curated picker, countries in display order, each with its
+subregions (empty list when the country is the only sensible choice).
+
+```json
+[
+  {
+    "id": "scotland", "name": "Scotland", "lat": 56.49, "lon": -4.2,
+    "subregions": [
+      { "id": "scotland/speyside", "name": "Speyside", "lat": 57.45, "lon": -3.15 },
+      { "id": "scotland/islay",    "name": "Islay",    "lat": 55.78, "lon": -6.25 }
+    ]
+  },
+  { "id": "sweden", "name": "Sweden", "lat": 62, "lon": 15, "subregions": [] }
+]
+```
+
+- Ids are stable slugs (`country` or `country/subregion`) — safe to store on the client.
+  Any row is a valid `region_id`, a country on its own included.
+- `lat`/`lon` are an approximate centroid. **Atlas fallback:** a tasting whose own
+  `lat`/`lon` are null but whose `region_id` is set should be drawn at that region's
+  centroid (client-side, from this list) — no Nominatim call needed. `location_precision`
+  on the tasting is unchanged by this, so such a tasting still comes back from
+  `?unplaced=true` and belongs on the NOT PLACED shelf as a *refine* item, like a
+  `country`-precision one; only a real `PUT …/location` takes it off the shelf.
+- The response carries a weak `ETag`. Send it back as `If-None-Match` to get `304` with no
+  body; fetch once per app start and cache.
+- Source of truth is `src/tasteep/data/region.json`, upserted into `tasteep_regions` at
+  boot. Editing the file and restarting adds/updates rows; nothing is deleted
+  automatically.
 
 ---
 
@@ -180,3 +223,7 @@ clients may call this freely; they should still store the result on the tasting 
 2. **Google:** send `{"id_token": …}`. **Discord:** send `{"code": …, "redirect_uri": …}`.
 3. **Sign-out** should call `POST /auth/signout` before dropping the local token.
 4. `photo_path` is stored verbatim; photos are not uploaded. There is no photo endpoint yet.
+5. **Regions.** `Tasting` gains `region_id` (nullable string; add it to `tasting.dart`).
+   Fetch `GET /tasteep/regions` once per session for the picker; keep the free-text field
+   so the user can still type anything. On the Atlas, draw a tasting with null `lat`/`lon`
+   but a `region_id` at that region's centroid.

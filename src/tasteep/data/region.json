@@ -1,0 +1,137 @@
+{
+  "_comment": "Seed for tasteep_regions. `main` is a country/top-level producing region, `sub` its whisky-relevant subregions (empty when the country is the only meaningful choice). lat/lon are approximate centroids used as the Atlas fallback pin when a tasting has no resolved location. Loaded at boot by RegionsService.seed(); rows are upserted by slug, never deleted.",
+  "regions": [
+    {
+      "main": "Scotland",
+      "lat": 56.49,
+      "lon": -4.2,
+      "sub": [
+        { "name": "Speyside", "lat": 57.45, "lon": -3.15 },
+        { "name": "Islay", "lat": 55.78, "lon": -6.25 },
+        { "name": "Orkney", "lat": 59.0, "lon": -3.0 },
+        { "name": "Lowland", "lat": 55.75, "lon": -3.8 },
+        { "name": "Highland", "lat": 57.3, "lon": -4.5 },
+        { "name": "Campbeltown", "lat": 55.43, "lon": -5.6 },
+        { "name": "Islands", "lat": 57.0, "lon": -6.3 }
+      ]
+    },
+    {
+      "main": "France",
+      "lat": 46.6,
+      "lon": 2.4,
+      "sub": [{ "name": "Brittany", "lat": 48.2, "lon": -2.93 }]
+    },
+    {
+      "main": "Ireland",
+      "lat": 53.4,
+      "lon": -7.9,
+      "sub": [
+        { "name": "Cork County", "lat": 51.95, "lon": -8.7 },
+        { "name": "Dublin", "lat": 53.35, "lon": -6.26 },
+        { "name": "Midleton", "lat": 51.91, "lon": -8.17 },
+        { "name": "Northern Ireland", "lat": 54.65, "lon": -6.6 }
+      ]
+    },
+    {
+      "main": "Japan",
+      "lat": 36.2,
+      "lon": 138.25,
+      "sub": [
+        { "name": "Hokkaido", "lat": 43.3, "lon": 142.8 },
+        { "name": "Honshu", "lat": 36.5, "lon": 138.5 },
+        { "name": "Kyushu", "lat": 32.7, "lon": 130.9 },
+        { "name": "Shikoku", "lat": 33.75, "lon": 133.5 }
+      ]
+    },
+    {
+      "main": "United States",
+      "lat": 39.8,
+      "lon": -98.55,
+      "sub": [
+        { "name": "Kentucky", "lat": 37.85, "lon": -85.5 },
+        { "name": "Washington", "lat": 47.4, "lon": -120.5 },
+        { "name": "California", "lat": 37.2, "lon": -119.5 },
+        { "name": "New York", "lat": 42.9, "lon": -75.5 },
+        { "name": "Texas", "lat": 31.4, "lon": -99.3 },
+        { "name": "Tennessee", "lat": 35.85, "lon": -86.35 }
+      ]
+    },
+    {
+      "main": "Taiwan",
+      "lat": 23.7,
+      "lon": 121.0,
+      "sub": [{ "name": "Yilan", "lat": 24.6, "lon": 121.6 }]
+    },
+    {
+      "main": "Australia",
+      "lat": -25.3,
+      "lon": 133.8,
+      "sub": [
+        { "name": "Tasmania", "lat": -42.0, "lon": 146.8 },
+        { "name": "Victoria", "lat": -37.0, "lon": 144.5 },
+        { "name": "New South Wales", "lat": -32.5, "lon": 147.0 },
+        { "name": "South Australia", "lat": -30.0, "lon": 135.0 },
+        { "name": "Western Australia", "lat": -26.0, "lon": 121.0 }
+      ]
+    },
+    {
+      "main": "Canada",
+      "lat": 56.1,
+      "lon": -106.3,
+      "sub": [
+        { "name": "Alberta", "lat": 54.5, "lon": -115.0 },
+        { "name": "British Columbia", "lat": 54.0, "lon": -125.0 },
+        { "name": "Manitoba", "lat": 54.5, "lon": -97.0 },
+        { "name": "New Brunswick", "lat": 46.5, "lon": -66.3 },
+        { "name": "Newfoundland and Labrador", "lat": 53.5, "lon": -60.0 },
+        { "name": "Nova Scotia", "lat": 45.0, "lon": -63.0 },
+        { "name": "Ontario", "lat": 50.0, "lon": -85.0 },
+        { "name": "Prince Edward Island", "lat": 46.3, "lon": -63.2 },
+        { "name": "Quebec", "lat": 52.0, "lon": -71.5 },
+        { "name": "Saskatchewan", "lat": 54.0, "lon": -106.0 }
+      ]
+    },
+    {
+      "main": "India",
+      "lat": 21.0,
+      "lon": 78.5,
+      "sub": [
+        { "name": "Goa", "lat": 15.4, "lon": 74.0 },
+        { "name": "Karnataka", "lat": 15.0, "lon": 76.0 },
+        { "name": "Maharashtra", "lat": 19.5, "lon": 75.5 },
+        { "name": "Punjab", "lat": 31.0, "lon": 75.5 },
+        { "name": "Rajasthan", "lat": 27.0, "lon": 74.0 },
+        { "name": "Tamil Nadu", "lat": 11.0, "lon": 78.5 },
+        { "name": "Telangana", "lat": 17.9, "lon": 79.5 },
+        { "name": "Uttarakhand", "lat": 30.1, "lon": 79.3 },
+        { "name": "Uttar Pradesh", "lat": 27.0, "lon": 80.5 }
+      ]
+    },
+    { "main": "Sweden", "lat": 62.0, "lon": 15.0, "sub": [] },
+    { "main": "New Zealand", "lat": -41.5, "lon": 172.8, "sub": [] },
+    { "main": "Wales", "lat": 52.3, "lon": -3.7, "sub": [] },
+    { "main": "South Africa", "lat": -29.0, "lon": 25.0, "sub": [] },
+    { "main": "Germany", "lat": 51.1, "lon": 10.4, "sub": [] },
+    { "main": "Belgium", "lat": 50.6, "lon": 4.6, "sub": [] },
+    { "main": "Netherlands", "lat": 52.2, "lon": 5.5, "sub": [] },
+    { "main": "Denmark", "lat": 56.1, "lon": 9.8, "sub": [] },
+    { "main": "England", "lat": 52.6, "lon": -1.5, "sub": [] },
+    { "main": "Finland", "lat": 63.5, "lon": 26.0, "sub": [] },
+    { "main": "Norway", "lat": 61.5, "lon": 9.0, "sub": [] },
+    { "main": "Switzerland", "lat": 46.8, "lon": 8.2, "sub": [] },
+    { "main": "Spain", "lat": 40.3, "lon": -3.7, "sub": [] },
+    { "main": "Italy", "lat": 42.6, "lon": 12.5, "sub": [] },
+    { "main": "Austria", "lat": 47.6, "lon": 14.1, "sub": [] },
+    { "main": "Czech Republic", "lat": 49.8, "lon": 15.5, "sub": [] },
+    { "main": "Poland", "lat": 52.1, "lon": 19.4, "sub": [] },
+    { "main": "Iceland", "lat": 64.9, "lon": -18.6, "sub": [] },
+    { "main": "Israel", "lat": 31.4, "lon": 35.0, "sub": [] },
+    { "main": "Turkey", "lat": 39.0, "lon": 35.2, "sub": [] },
+    { "main": "Pakistan", "lat": 30.4, "lon": 69.3, "sub": [] },
+    { "main": "China", "lat": 35.0, "lon": 103.0, "sub": [] },
+    { "main": "South Korea", "lat": 36.5, "lon": 127.8, "sub": [] },
+    { "main": "Mexico", "lat": 23.6, "lon": -102.5, "sub": [] },
+    { "main": "Argentina", "lat": -35.0, "lon": -65.0, "sub": [] },
+    { "main": "Brazil", "lat": -10.8, "lon": -53.0, "sub": [] }
+  ]
+}

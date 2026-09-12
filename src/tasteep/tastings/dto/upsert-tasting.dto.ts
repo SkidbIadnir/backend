@@ -48,6 +48,12 @@ export class UpsertTastingDto {
   @IsString()
   region?: string | null;
 
+  /** Id from `GET /tasteep/regions` (e.g. `scotland/islay`). `400` if unknown. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  region_id?: string | null;
+
   @IsOptional()
   @IsNumber()
   @Min(0)

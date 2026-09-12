@@ -12,18 +12,13 @@ import {
 } from '../entities/tasteep-tasting.entity';
 import { UpsertTastingDto } from './dto/upsert-tasting.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
+import { RegionsService } from '../regions/regions.service';
 import { applyUpsertDto, TastingJson, toTastingJson } from './tasting.mapper';
 
 export interface TastingStats {
   count: number;
   avg_score: number | null;
   distinct_distilleries: number;
-}
-
-export interface CabinetGroup {
-  distillery: string | null;
-  count: number;
-  avg_score: number | null;
 }
 
 const round1 = (v: number) => Math.round(v * 10) / 10;
@@ -33,6 +28,7 @@ export class TastingsService {
   constructor(
     @InjectRepository(TasteepTasting)
     private readonly repo: Repository<TasteepTasting>,
+    private readonly regions: RegionsService,
   ) {}
 
   /** Newest `date_tasted` first; undated entries last. `unplaced` keeps only `unknown`/`country` precision. */
@@ -63,6 +59,10 @@ export class TastingsService {
    * Create-or-replace. The client owns the id. `created_at` is set only on
    * first insert; `updated_at` always bumps. A `manual` location pin on the
    * existing row survives an automated (non-manual) precision in the body.
+   *
+   * Region: `region_id` (from the picker) wins and must exist; otherwise the
+   * free-text `region` is matched by name. Picking without text fills the
+   * text with the region's name so the journal stays readable.
    */
   async upsert(
     userId: string,
@@ -83,6 +83,10 @@ export class TastingsService {
         : null;
 
     applyUpsertDto(target, dto);
+
+    const region = await this.regions.resolve(dto.region_id, dto.region);
+    target.regionId = region?.id ?? null;
+    if (region && !target.region) target.region = region.name;
 
     if (pinned && target.locationPrecision !== 'manual') {
       target.lat = pinned.lat;
@@ -153,30 +157,6 @@ export class TastingsService {
         raw?.avg_score == null ? null : round1(parseFloat(raw.avg_score)),
       distinct_distilleries: parseInt(raw?.distinct_distilleries ?? '0', 10),
     };
-  }
-
-  /** Tastings grouped by distillery, most-stocked first. `null` distillery is its own group. */
-  async cabinet(userId: string): Promise<CabinetGroup[]> {
-    const rows = await this.repo
-      .createQueryBuilder('t')
-      .select('t.distillery', 'distillery')
-      .addSelect('COUNT(*)', 'count')
-      .addSelect('AVG(t.score)', 'avg_score')
-      .where('t.userId = :userId', { userId })
-      .groupBy('t.distillery')
-      .orderBy('count', 'DESC')
-      .addOrderBy('t.distillery', 'ASC')
-      .getRawMany<{
-        distillery: string | null;
-        count: string;
-        avg_score: string | null;
-      }>();
-
-    return rows.map((r) => ({
-      distillery: r.distillery ?? null,
-      count: parseInt(r.count, 10),
-      avg_score: r.avg_score == null ? null : round1(parseFloat(r.avg_score)),
-    }));
   }
 
   private async findOwned(userId: string, id: string): Promise<TasteepTasting> {
