@@ -24,11 +24,7 @@ jest.mock('playwright', () => ({
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import {
-  ScraperService,
-  ScrapedWhiskyData,
-  ScrapedWhiskyListItem,
-} from './scraper.service';
+import { ScraperService, ScrapedWhiskyListItem } from './scraper.service';
 import { SmwsLive } from '../entities/smws-live.entity';
 import { SmwsArchive } from '../entities/smws-archive.entity';
 import { SmwsDistillery } from '../entities/smws-distillery.entity';
@@ -91,6 +87,20 @@ describe('ScraperService', () => {
       expect(findNew(scraped, existing)).toEqual([]);
     });
 
+    it('matches by href, not title — a changed title with the same href is not new', () => {
+      const scraped = [{ title: 'A (re-released)', href: '/a' }];
+      const existing = [{ title: 'A', href: '/a' }];
+      expect(findNew(scraped, existing)).toEqual([]);
+    });
+
+    it('treats same title with a different href as a distinct (new) item', () => {
+      const scraped = [{ title: 'A', href: '/a-2' }];
+      const existing = [{ title: 'A', href: '/a' }];
+      expect(findNew(scraped, existing)).toEqual([
+        { title: 'A', href: '/a-2' },
+      ]);
+    });
+
     it('returns all scraped items when existing list is empty', () => {
       const scraped = [
         { title: 'A', href: '/a' },
@@ -128,6 +138,18 @@ describe('ScraperService', () => {
       expect(findRemoved(list, list)).toEqual([]);
     });
 
+    it('matches by href, not title — a changed title with the same href is not removed', () => {
+      const scraped = [{ title: 'A (re-released)', href: '/a' }];
+      const existing = [{ title: 'A', href: '/a' }];
+      expect(findRemoved(scraped, existing)).toEqual([]);
+    });
+
+    it('never treats an existing row with no href as removed', () => {
+      const scraped = [{ title: 'B', href: '/b' }];
+      const existing = [{ title: 'A', href: '' }];
+      expect(findRemoved(scraped, existing)).toEqual([]);
+    });
+
     it('returns all existing when scraped list is empty', () => {
       const existing = [
         { title: 'A', href: '/a' },
@@ -150,7 +172,7 @@ describe('ScraperService', () => {
         generatedMaps: [],
         raw: [],
       });
-      liveRepo.findOne!.mockResolvedValue(makeSmwsLive());
+      liveRepo.find!.mockResolvedValue([makeSmwsLive()]);
     });
 
     it('calls distilleryRepo.findBy for whiskies missing distillery name', async () => {
@@ -210,21 +232,38 @@ describe('ScraperService', () => {
       expect(upsertArg.newSince).toBeNull();
     });
 
-    it('returns saved entities fetched via findOne', async () => {
+    it('returns saved entities fetched via a single batched find', async () => {
       const entity = makeSmwsLive();
-      liveRepo.findOne!.mockResolvedValue(entity);
+      liveRepo.find!.mockResolvedValue([entity]);
       const result = await service.saveWhiskiesToDatabase([
         makeScrapedWhisky(),
       ]);
       expect(result).toEqual([entity]);
+      expect(liveRepo.find).toHaveBeenCalledTimes(1);
     });
 
-    it('skips whiskies where findOne returns null', async () => {
-      liveRepo.findOne!.mockResolvedValue(null);
+    it('does not call find when every upsert fails', async () => {
+      liveRepo.upsert!.mockRejectedValue(new Error('DB error'));
       const result = await service.saveWhiskiesToDatabase([
         makeScrapedWhisky(),
       ]);
       expect(result).toEqual([]);
+      expect(liveRepo.find).not.toHaveBeenCalled();
+    });
+
+    it('skips whiskies not present in the batched find result', async () => {
+      liveRepo.find!.mockResolvedValue([]);
+      const result = await service.saveWhiskiesToDatabase([
+        makeScrapedWhisky(),
+      ]);
+      expect(result).toEqual([]);
+    });
+
+    it('does not coerce a distilleryId of 0 to null', async () => {
+      const whisky = makeScrapedWhisky({ distilleryId: 0, distillery: 'X' });
+      await service.saveWhiskiesToDatabase([whisky]);
+      const upsertArg = (liveRepo.upsert as jest.Mock).mock.calls[0][0];
+      expect(upsertArg.distilleryCode).toBe('0');
     });
 
     it('logs error and continues when upsert throws for a single whisky', async () => {
@@ -233,9 +272,9 @@ describe('ScraperService', () => {
         .mockResolvedValue({ identifiers: [], generatedMaps: [], raw: [] });
       const w1 = makeScrapedWhisky({ fullCode: '1.1', name: 'Whisky A' });
       const w2 = makeScrapedWhisky({ fullCode: '1.2', name: 'Whisky B' });
-      liveRepo.findOne!.mockResolvedValue(makeSmwsLive());
+      liveRepo.find!.mockResolvedValue([makeSmwsLive({ fullCode: '1.2' })]);
       const result = await service.saveWhiskiesToDatabase([w1, w2]);
-      // w1 upsert threw, so only w2 saved
+      // w1 upsert threw, so only w2's fullCode is in the batched find lookup
       expect(result).toHaveLength(1);
     });
   });
@@ -255,6 +294,139 @@ describe('ScraperService', () => {
 
     it('does not throw with all dependencies mocked', async () => {
       await expect(service.runScraper()).resolves.not.toThrow();
+    });
+  });
+
+  // ─── collectAllPagesBasicInfo ────────────────────────────────────────────────
+
+  describe('collectAllPagesBasicInfo', () => {
+    const collect = (page: any, buildPageUrl: (n: number) => string) =>
+      (service as any).collectAllPagesBasicInfo(page, buildPageUrl, 'test');
+
+    beforeEach(() => {
+      jest.spyOn(service as any, 'delay').mockResolvedValue(undefined);
+    });
+
+    it('reports complete:false after exhausting retries on a page error', async () => {
+      const page = {
+        goto: jest.fn().mockResolvedValue(null),
+        waitForSelector: jest.fn().mockRejectedValue(new Error('timeout')),
+        evaluate: jest.fn().mockResolvedValue([]),
+      };
+      const result = await collect(page, (n) => `url${n}`);
+      expect(result).toEqual({ items: [], complete: false });
+      // 1 initial attempt + 2 retries (maxPageErrorRetries)
+      expect(page.waitForSelector).toHaveBeenCalledTimes(3);
+    });
+
+    it('recovers from a transient error and still reports complete:true', async () => {
+      const page = {
+        goto: jest.fn().mockResolvedValue(null),
+        waitForSelector: jest
+          .fn()
+          .mockRejectedValueOnce(new Error('timeout'))
+          .mockResolvedValue(null),
+        evaluate: jest
+          .fn()
+          .mockResolvedValueOnce([{ title: 'A', href: '/a' }])
+          .mockResolvedValue([]),
+      };
+      const result = await collect(page, (n) => `url${n}`);
+      expect(result).toEqual({
+        items: [{ title: 'A', href: '/a' }],
+        complete: true,
+      });
+    });
+
+    it('reaching a genuine empty page still reports complete:true', async () => {
+      const page = {
+        goto: jest.fn().mockResolvedValue(null),
+        waitForSelector: jest.fn().mockResolvedValue(null),
+        evaluate: jest.fn().mockResolvedValue([]),
+      };
+      const result = await collect(page, (n) => `url${n}`);
+      expect(result).toEqual({ items: [], complete: true });
+    });
+  });
+
+  // ─── incomplete list handling in runScraper ──────────────────────────────────
+
+  describe('runScraper — incomplete list handling', () => {
+    beforeEach(() => {
+      jest.spyOn(service as any, 'delay').mockResolvedValue(undefined);
+    });
+
+    it('skips markWhiskiesAsUnavailable when list collection is incomplete', async () => {
+      jest
+        .spyOn(service as any, 'collectAllWhiskyBasicInfo')
+        .mockResolvedValue({
+          items: [],
+          complete: false,
+        });
+      liveRepo.find!.mockResolvedValue([
+        { name: 'Existing', url: 'https://smws.eu/product/existing' },
+      ]);
+      const markUnavailableSpy = jest.spyOn(
+        service as any,
+        'markWhiskiesAsUnavailable',
+      );
+
+      await service.runScraper();
+
+      expect(markUnavailableSpy).not.toHaveBeenCalled();
+    });
+
+    it('still marks removed whiskies unavailable when list collection completes', async () => {
+      jest
+        .spyOn(service as any, 'collectAllWhiskyBasicInfo')
+        .mockResolvedValue({
+          items: [],
+          complete: true,
+        });
+      liveRepo.find!.mockResolvedValue([
+        { name: 'Existing', url: 'https://smws.eu/product/existing' },
+      ]);
+      const markUnavailableSpy = jest.spyOn(
+        service as any,
+        'markWhiskiesAsUnavailable',
+      );
+
+      await service.runScraper();
+
+      expect(markUnavailableSpy).toHaveBeenCalledWith([
+        { title: 'Existing', href: 'https://smws.eu/product/existing' },
+      ]);
+    });
+  });
+
+  // ─── overlapping run guard ────────────────────────────────────────────────────
+
+  describe('overlapping run guard', () => {
+    beforeEach(() => {
+      jest.spyOn(service as any, 'delay').mockResolvedValue(undefined);
+      liveRepo.find!.mockResolvedValue([]);
+    });
+
+    it('skips a second concurrent runScraper call while one is in-flight', async () => {
+      const warnSpy = jest.spyOn((service as any).logger, 'warn');
+
+      const first = service.runScraper();
+      const second = service.runScraper();
+      await Promise.all([first, second]);
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('previous run is still in progress'),
+      );
+    });
+
+    it('allows a subsequent run once the previous one has finished', async () => {
+      await service.runScraper();
+      const warnSpy = jest.spyOn((service as any).logger, 'warn');
+      await service.runScraper();
+
+      expect(warnSpy).not.toHaveBeenCalledWith(
+        expect.stringContaining('previous run is still in progress'),
+      );
     });
   });
 });

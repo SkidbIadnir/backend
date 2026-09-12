@@ -46,6 +46,10 @@ export class ScraperService {
   private readonly logger = new Logger(ScraperService.name);
   private browser: Browser | null = null;
   private readonly emptyPageRetryDelayMs = 10000;
+  private readonly pageErrorRetryDelayMs = 5000;
+  private readonly maxPageErrorRetries = 2;
+  private isLiveScraperRunning = false;
+  private isArchiveScraperRunning = false;
 
   constructor(
     @InjectRepository(SmwsLive)
@@ -98,16 +102,23 @@ export class ScraperService {
 
   /**
    * Generic paginated card collector — reused by live and archive scrapers.
+   *
+   * Returns `complete: false` when pagination was cut short by a scraping error
+   * (network blip, selector timeout) after exhausting retries, as opposed to
+   * genuinely running out of pages. Callers should treat an incomplete list as
+   * a partial snapshot, not an authoritative "these items are all that exist"
+   * result — e.g. skip destructive "mark missing items removed" logic.
    */
   private async collectAllPagesBasicInfo(
     page: Page,
     buildPageUrl: (pageNum: number) => string,
     logLabel: string,
-  ): Promise<ScrapedWhiskyListItem[]> {
+  ): Promise<{ items: ScrapedWhiskyListItem[]; complete: boolean }> {
     this.logger.log(`Collecting ${logLabel} list from all pages...`);
     const allWhiskies: ScrapedWhiskyListItem[] = [];
     let currentPage = 1;
     let hasMorePages = true;
+    let complete = true;
 
     const extractCards = () =>
       page.evaluate(() => {
@@ -124,58 +135,74 @@ export class ScraperService {
     while (hasMorePages) {
       this.logger.log(`Scraping ${logLabel} page ${currentPage}...`);
 
-      try {
-        if (currentPage > 1) {
-          await page.goto(buildPageUrl(currentPage), {
-            waitUntil: 'domcontentloaded',
-            timeout: 45000,
+      let attempt = 0;
+      let pageHandled = false;
+
+      while (!pageHandled) {
+        try {
+          if (currentPage > 1) {
+            await page.goto(buildPageUrl(currentPage), {
+              waitUntil: 'domcontentloaded',
+              timeout: 45000,
+            });
+          }
+
+          await page.waitForSelector('#product-listing-container', {
+            timeout: 15000,
           });
+          await this.delay(2000);
+
+          let pageWhiskies = await extractCards();
+
+          if (pageWhiskies.length === 0) {
+            this.logger.warn(
+              `${logLabel} page ${currentPage} returned 0 products. Waiting ${this.emptyPageRetryDelayMs / 1000}s and retrying.`,
+            );
+            await this.delay(this.emptyPageRetryDelayMs);
+            pageWhiskies = await extractCards();
+          }
+
+          if (pageWhiskies.length === 0) {
+            this.logger.log(
+              `No products on ${logLabel} page ${currentPage}. Reached end.`,
+            );
+            hasMorePages = false;
+          } else {
+            this.logger.log(
+              `Found ${pageWhiskies.length} on ${logLabel} page ${currentPage}`,
+            );
+            allWhiskies.push(...pageWhiskies);
+            currentPage++;
+          }
+          pageHandled = true;
+        } catch (error) {
+          attempt++;
+          if (attempt > this.maxPageErrorRetries) {
+            this.logger.error(
+              `Giving up on ${logLabel} page ${currentPage} after ${attempt} attempts: ${error.message}. Treating this scrape as incomplete.`,
+            );
+            hasMorePages = false;
+            complete = false;
+            pageHandled = true;
+          } else {
+            this.logger.warn(
+              `Error on ${logLabel} page ${currentPage} (attempt ${attempt}/${this.maxPageErrorRetries}): ${error.message}. Retrying in ${this.pageErrorRetryDelayMs / 1000}s.`,
+            );
+            await this.delay(this.pageErrorRetryDelayMs);
+          }
         }
-
-        await page.waitForSelector('#product-listing-container', {
-          timeout: 15000,
-        });
-        await this.delay(2000);
-
-        let pageWhiskies = await extractCards();
-
-        if (pageWhiskies.length === 0) {
-          this.logger.warn(
-            `${logLabel} page ${currentPage} returned 0 products. Waiting ${this.emptyPageRetryDelayMs / 1000}s and retrying.`,
-          );
-          await this.delay(this.emptyPageRetryDelayMs);
-          pageWhiskies = await extractCards();
-        }
-
-        if (pageWhiskies.length === 0) {
-          this.logger.log(
-            `No products on ${logLabel} page ${currentPage}. Reached end.`,
-          );
-          hasMorePages = false;
-        } else {
-          this.logger.log(
-            `Found ${pageWhiskies.length} on ${logLabel} page ${currentPage}`,
-          );
-          allWhiskies.push(...pageWhiskies);
-          currentPage++;
-        }
-      } catch (error) {
-        this.logger.error(
-          `Error on ${logLabel} page ${currentPage}: ${error.message}`,
-        );
-        hasMorePages = false;
       }
     }
 
     this.logger.log(
-      `${logLabel} total — pages: ${currentPage - 1}, whiskies: ${allWhiskies.length}`,
+      `${logLabel} total — pages: ${currentPage - 1}, whiskies: ${allWhiskies.length}, complete: ${complete}`,
     );
-    return allWhiskies;
+    return { items: allWhiskies, complete };
   }
 
   private async collectAllWhiskyBasicInfo(
     page: Page,
-  ): Promise<ScrapedWhiskyListItem[]> {
+  ): Promise<{ items: ScrapedWhiskyListItem[]; complete: boolean }> {
     return this.collectAllPagesBasicInfo(
       page,
       (n) =>
@@ -186,7 +213,7 @@ export class ScraperService {
 
   private async collectAllArchiveWhiskyBasicInfo(
     page: Page,
-  ): Promise<ScrapedWhiskyListItem[]> {
+  ): Promise<{ items: ScrapedWhiskyListItem[]; complete: boolean }> {
     return this.collectAllPagesBasicInfo(
       page,
       (n) => `https://smws.eu/archive?page=${n}`,
@@ -290,6 +317,13 @@ export class ScraperService {
   }
 
   async runScraper(): Promise<void> {
+    if (this.isLiveScraperRunning) {
+      this.logger.warn(
+        'Live scraper run requested while a previous run is still in progress — skipping.',
+      );
+      return;
+    }
+    this.isLiveScraperRunning = true;
     this.logger.log('=== STARTING SMWS SCRAPER ===');
 
     const browser = await this.initBrowser();
@@ -309,7 +343,8 @@ export class ScraperService {
       await this.handleModals(page);
 
       this.logger.log('Step 2: Collecting whisky list...');
-      const allWhiskies = await this.collectAllWhiskyBasicInfo(page);
+      const { items: allWhiskies, complete } =
+        await this.collectAllWhiskyBasicInfo(page);
 
       this.logger.log('Step 3: Fetching existing whiskies from database...');
       const existingWhiskies = await this.getExistingWhiskiesFromDB();
@@ -323,15 +358,21 @@ export class ScraperService {
         allWhiskies,
         existingWhiskies,
       );
-      const existingAvailableWhiskies = allWhiskies.filter((scraped) =>
-        existingWhiskies.some((existing) => existing.title === scraped.title),
+      const existingAvailableWhiskies = allWhiskies.filter(
+        (scraped) =>
+          scraped.href &&
+          existingWhiskies.some((existing) => existing.href === scraped.href),
       );
 
       this.logger.log(
         `New: ${newWhiskies.length}, Removed: ${removedWhiskies.length}, Still available: ${existingAvailableWhiskies.length}`,
       );
 
-      if (removedWhiskies.length > 0) {
+      if (!complete) {
+        this.logger.warn(
+          'Whisky list collection did not complete cleanly (a page kept failing) — skipping the "mark removed as unavailable" step this run to avoid falsely marking still-listed whiskies unavailable.',
+        );
+      } else if (removedWhiskies.length > 0) {
         this.logger.log('Step 5: Marking removed whiskies as unavailable...');
         await this.markWhiskiesAsUnavailable(removedWhiskies);
       }
@@ -367,6 +408,7 @@ export class ScraperService {
       await page.close();
       await context.close();
       await this.closeBrowser();
+      this.isLiveScraperRunning = false;
     }
   }
 
@@ -382,47 +424,63 @@ export class ScraperService {
     }
   }
 
+  /**
+   * Matched by product URL (`href`), not title — SMWS titles are free-text
+   * descriptions that can collide or drift between scrapes of the same cask,
+   * while the product URL is a stable identity. Items with no href can't be
+   * confidently identified, so a missing href is treated as "new" (safe to
+   * re-scrape) rather than silently matched against something else.
+   */
   private findNewWhiskies(
     scrapedWhiskies: ScrapedWhiskyListItem[],
     existingWhiskies: ScrapedWhiskyListItem[],
   ): ScrapedWhiskyListItem[] {
-    const existingTitles = new Set(existingWhiskies.map((w) => w.title));
-    return scrapedWhiskies.filter((w) => !existingTitles.has(w.title));
+    const existingHrefs = new Set(
+      existingWhiskies.filter((w) => w.href).map((w) => w.href),
+    );
+    return scrapedWhiskies.filter((w) => !w.href || !existingHrefs.has(w.href));
   }
 
+  /**
+   * Matched by product URL (`href`) — see findNewWhiskies. An existing DB row
+   * with no href is never considered "removed" since we have no reliable way
+   * to confirm it's actually gone.
+   */
   private findRemovedWhiskies(
     scrapedWhiskies: ScrapedWhiskyListItem[],
     existingWhiskies: ScrapedWhiskyListItem[],
   ): ScrapedWhiskyListItem[] {
-    const scrapedTitles = new Set(scrapedWhiskies.map((w) => w.title));
-    return existingWhiskies.filter((w) => !scrapedTitles.has(w.title));
+    const scrapedHrefs = new Set(
+      scrapedWhiskies.filter((w) => w.href).map((w) => w.href),
+    );
+    return existingWhiskies.filter((w) => w.href && !scrapedHrefs.has(w.href));
   }
 
   private async markWhiskiesAsUnavailable(
     whiskies: ScrapedWhiskyListItem[],
   ): Promise<void> {
-    this.logger.log(`Marking ${whiskies.length} whiskies as unavailable`);
-    const names = whiskies.map((w) => w.title);
+    const urls = whiskies.map((w) => w.href).filter((href) => !!href);
+    if (urls.length === 0) return;
+    this.logger.log(`Marking ${urls.length} whiskies as unavailable`);
     await this.liveRepo
       .createQueryBuilder()
       .update()
       .set({ available: false })
-      .where('name IN (:...names)', { names })
+      .where('url IN (:...urls)', { urls })
       .execute();
   }
 
   private async markWhiskiesAsAvailable(
     whiskies: ScrapedWhiskyListItem[],
   ): Promise<void> {
-    this.logger.log(
-      `Ensuring ${whiskies.length} whiskies are marked as available`,
-    );
-    const names = whiskies.map((w) => w.title);
+    const urls = whiskies.map((w) => w.href).filter((href) => !!href);
+    if (urls.length === 0) return;
+    this.logger.log(`Ensuring ${urls.length} whiskies are marked as available`);
     await this.liveRepo
       .createQueryBuilder()
       .update()
       .set({ available: true })
-      .where('name IN (:...names)', { names })
+      .where('url IN (:...urls)', { urls })
       .execute();
   }
 
@@ -466,7 +524,7 @@ export class ScraperService {
       }
     }
 
-    const saved: SmwsLive[] = [];
+    const savedCodes: string[] = [];
 
     for (const whisky of whiskies) {
       try {
@@ -478,7 +536,10 @@ export class ScraperService {
         const entity: Partial<SmwsLive> = {
           name: whisky.name,
           fullCode: whisky.fullCode,
-          distilleryCode: whisky.distilleryId?.toString() || null,
+          distilleryCode:
+            whisky.distilleryId !== undefined && whisky.distilleryId !== null
+              ? whisky.distilleryId.toString()
+              : null,
           caskNo: whisky.caskNo || null,
           price: whisky.price || null,
           abv: whisky.abv || null,
@@ -498,17 +559,21 @@ export class ScraperService {
           skipUpdateIfNoValuesChanged: false,
         });
 
-        // Fetch the saved entity to return it with full data for alert checking
-        const savedEntity = await this.liveRepo.findOne({
-          where: { fullCode: whisky.fullCode },
-        });
-        if (savedEntity) saved.push(savedEntity);
+        savedCodes.push(whisky.fullCode);
       } catch (error) {
         this.logger.error(
           `Error saving whisky ${whisky.name} (${whisky.fullCode}): ${error.message}`,
         );
       }
     }
+
+    // Batch-fetch the saved rows in a single query instead of one findOne per
+    // whisky — the loop above still upserts one-by-one so a bad row doesn't
+    // abort the whole batch, but the read-back only needs one round trip.
+    const saved =
+      savedCodes.length > 0
+        ? await this.liveRepo.find({ where: { fullCode: In(savedCodes) } })
+        : [];
 
     this.logger.log(`Saved ${saved.length}/${whiskies.length} whiskies`);
     return saved;
@@ -709,6 +774,13 @@ export class ScraperService {
   }
 
   async runArchiveScraper(): Promise<void> {
+    if (this.isArchiveScraperRunning) {
+      this.logger.warn(
+        'Archive scraper run requested while a previous run is still in progress — skipping.',
+      );
+      return;
+    }
+    this.isArchiveScraperRunning = true;
     this.logger.log('=== STARTING SMWS ARCHIVE SCRAPER ===');
 
     const browser = await this.initBrowser();
@@ -728,7 +800,13 @@ export class ScraperService {
       await this.handleModals(page);
 
       this.logger.log('Step 2: Collecting archive whisky list...');
-      const allWhiskies = await this.collectAllArchiveWhiskyBasicInfo(page);
+      const { items: allWhiskies, complete } =
+        await this.collectAllArchiveWhiskyBasicInfo(page);
+      if (!complete) {
+        this.logger.warn(
+          'Archive whisky list collection did not complete cleanly (a page kept failing) — proceeding with the partial list for new-item detection.',
+        );
+      }
 
       this.logger.log(
         'Step 3: Fetching existing archive whiskies from database...',
@@ -770,6 +848,7 @@ export class ScraperService {
       await page.close();
       await context.close();
       await this.closeBrowser();
+      this.isArchiveScraperRunning = false;
     }
   }
 }
