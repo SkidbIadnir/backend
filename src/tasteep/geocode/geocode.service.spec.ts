@@ -2,6 +2,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { GeocodeService, normalizeQuery } from './geocode.service';
 import { NominatimClient } from './nominatim.client';
 import { SerialRateLimiter } from './rate-limiter';
+import { DistilleryLocationsService } from './distillery-locations.service';
 import { TasteepGeocodeCache } from '../entities/tasteep-geocode-cache.entity';
 import {
   createMockRepository,
@@ -20,17 +21,20 @@ describe('GeocodeService', () => {
   let service: GeocodeService;
   let cache: MockRepository<TasteepGeocodeCache>;
   let nominatim: { search: jest.Mock };
+  let distilleryLocations: { match: jest.Mock };
   let limiter: SerialRateLimiter;
 
   beforeEach(() => {
     cache = createMockRepository<TasteepGeocodeCache>();
     cache.save!.mockImplementation(async (row: TasteepGeocodeCache) => row);
     nominatim = { search: jest.fn() };
+    distilleryLocations = { match: jest.fn().mockResolvedValue(null) };
     limiter = new SerialRateLimiter(0);
     jest.spyOn(limiter, 'schedule');
     service = new GeocodeService(
       cache as never,
       nominatim as unknown as NominatimClient,
+      distilleryLocations as unknown as DistilleryLocationsService,
       limiter,
     );
   });
@@ -108,6 +112,35 @@ describe('GeocodeService', () => {
         precision: 'unknown',
       }),
     );
+  });
+
+  it('serves a curated hit without touching Nominatim or the rate limiter', async () => {
+    cache.findOne!.mockResolvedValue(null);
+    distilleryLocations.match.mockResolvedValue({
+      lat: 55.6418579,
+      lon: -6.1111707,
+      precision: 'exact',
+    });
+
+    const result = await service.resolve('ardbeg · islay');
+
+    expect(distilleryLocations.match).toHaveBeenCalledWith('ardbeg · islay');
+    expect(nominatim.search).not.toHaveBeenCalled();
+    expect(limiter.schedule).not.toHaveBeenCalled();
+    expect(cache.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: 'ardbeg · islay',
+        lat: 55.6418579,
+        lon: -6.1111707,
+        precision: 'exact',
+        provider: 'curated',
+      }),
+    );
+    expect(result).toEqual({
+      lat: 55.6418579,
+      lon: -6.1111707,
+      precision: 'exact',
+    });
   });
 
   it('shares one upstream request between identical in-flight queries', async () => {

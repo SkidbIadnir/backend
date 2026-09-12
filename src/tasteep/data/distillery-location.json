@@ -1,0 +1,12 @@
+{
+  "_comment": "Seed for tasteep_distillery_locations. Coordinates the app should trust over Nominatim for a given distillery name, because Nominatim resolves the name ambiguously, wrongly, or not at all. Loaded at boot by DistilleryLocationsService.seed(); rows are upserted by slug, never deleted. Add an entry whenever GeocodeService logs 'no result' (or a plausible-looking but wrong result) for a distillery name.",
+  "distilleries": [
+    {
+      "name": "Ardbeg",
+      "lat": 55.6418579,
+      "lon": -6.1111707,
+      "precision": "exact",
+      "_note": "Nominatim resolves 'ardbeg' alone to an unrelated village on the Isle of Bute, and returns nothing for 'ardbeg · islay' / 'ardbeg, islay' since Islay never appears in Ardbeg's stored OSM address chain. This is the Ardbeg hamlet next to Lagavulin on Islay (OSM node 277913131)."
+    }
+  ]
+}

@@ -10,6 +10,8 @@ import { TasteepGeocodeCache } from '../entities/tasteep-geocode-cache.entity';
 import { LocationPrecision } from '../entities/tasteep-tasting.entity';
 import { NominatimClient } from './nominatim.client';
 import { SerialRateLimiter } from './rate-limiter';
+import { DistilleryLocationsService } from './distillery-locations.service';
+import { normalizeQuery } from './normalize-query';
 
 export interface GeocodeResult {
   lat: number;
@@ -20,9 +22,7 @@ export interface GeocodeResult {
 /** Nominatim usage policy: max 1 request per second, server-wide. */
 export const NOMINATIM_MIN_INTERVAL_MS = 1000;
 
-export function normalizeQuery(query: string): string {
-  return query.trim().replace(/\s+/g, ' ').toLowerCase();
-}
+export { normalizeQuery };
 
 /**
  * Cache-first geocoding. Every query hits `tasteep_geocode_cache` before
@@ -38,6 +38,7 @@ export class GeocodeService {
     @InjectRepository(TasteepGeocodeCache)
     private readonly cacheRepo: Repository<TasteepGeocodeCache>,
     private readonly nominatim: NominatimClient,
+    private readonly distilleryLocations: DistilleryLocationsService,
     private readonly limiter: SerialRateLimiter = new SerialRateLimiter(
       NOMINATIM_MIN_INTERVAL_MS,
     ),
@@ -65,18 +66,24 @@ export class GeocodeService {
   }
 
   private async lookupAndStore(query: string): Promise<GeocodeResult> {
-    const hit = await this.limiter.schedule(() => this.nominatim.search(query));
+    // Check the curated table (tasteep_distillery_locations) before spending
+    // a rate-limited Nominatim request — see DistilleryLocationsService for
+    // why some names need it.
+    const curated = await this.distilleryLocations.match(query);
+    const hit =
+      curated ??
+      (await this.limiter.schedule(() => this.nominatim.search(query)));
 
     const row = this.cacheRepo.create({
       query,
       lat: hit?.lat ?? null,
       lon: hit?.lon ?? null,
       precision: hit?.precision ?? 'unknown',
-      provider: 'nominatim',
+      provider: curated ? 'curated' : 'nominatim',
     });
     await this.cacheRepo.save(row);
     this.logger.log(
-      `Geocoded "${query}" → ${hit ? `${hit.precision} (${hit.lat}, ${hit.lon})` : 'no result'}`,
+      `Geocoded "${query}" → ${hit ? `${hit.precision} (${hit.lat}, ${hit.lon})${curated ? ' [curated]' : ''}` : 'no result'}`,
     );
 
     return this.toResult(row, query);
