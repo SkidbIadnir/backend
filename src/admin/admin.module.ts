@@ -7,6 +7,7 @@ import { SmwsLive } from '../smws/entities/smws-live.entity';
 import { SmwsLookout } from '../smws/entities/smws-lookout.entity';
 import { ScraperModule } from '../smws/scraper/scraper.module';
 import { TasteepAuthModule } from '../tasteep/auth/tasteep-auth.module';
+import { SmwsCodesModule } from '../tasteep/smws-codes/smws-codes.module';
 import { TasteepEmailOtp } from '../tasteep/entities/tasteep-email-otp.entity';
 import { TasteepGeocodeCache } from '../tasteep/entities/tasteep-geocode-cache.entity';
 import { TasteepSession } from '../tasteep/entities/tasteep-session.entity';
@@ -17,6 +18,7 @@ import { AdminAuditService } from './admin-audit.service';
 import { AdminGuard } from './admin-auth.guard';
 import { AdminLogsController } from './admin-logs.controller';
 import { AdminSmwsController } from './admin-smws.controller';
+import { AdminSmwsCodesController } from './admin-smws-codes.controller';
 import { AdminSmwsService } from './admin-smws.service';
 import { AdminStatsController } from './admin-stats.controller';
 import { AdminStatsService } from './admin-stats.service';
@@ -44,6 +46,7 @@ import { ADMIN_LOG_BUFFER, logBuffer } from './logging/log-buffer';
       { ttl: 60_000, limit: adminConfig.rateLimitPerMinute },
     ]),
     TasteepAuthModule,
+    SmwsCodesModule,
     ScraperModule,
   ],
   controllers: [
@@ -51,6 +54,7 @@ import { ADMIN_LOG_BUFFER, logBuffer } from './logging/log-buffer';
     AdminUsersController,
     AdminTastingsController,
     AdminSmwsController,
+    AdminSmwsCodesController,
     AdminLogsController,
   ],
   providers: [

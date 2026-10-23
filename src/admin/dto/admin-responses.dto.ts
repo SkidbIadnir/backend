@@ -184,3 +184,41 @@ export class LogPage {
   items: LogEntryJson[];
   total: number;
 }
+
+export class AdminSmwsCodeJson {
+  code: string;
+  distillery_name: string;
+  category: string;
+  region: string | null;
+  region_id: string | null;
+  extra: string | null;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+export class AdminSmwsCodePage {
+  items: AdminSmwsCodeJson[];
+  total: number;
+}
+
+export class SmwsCodeFieldDiff {
+  field: string;
+  json: string | null;
+  table: string | null;
+}
+export class SmwsCodeChange {
+  code: string;
+  fields: SmwsCodeFieldDiff[];
+}
+export class SmwsCodesDiffJson {
+  in_sync: boolean;
+  /** In the seed file, not in the table: inserted on the next boot. */
+  only_in_json: string[];
+  /** Live in the table, absent from the seed file (added from the dashboard). */
+  only_in_table: string[];
+  /** In the seed file but deleted from the dashboard; the seed won't bring them back. */
+  deleted_in_table: string[];
+  /** In both, with different values. */
+  changed: SmwsCodeChange[];
+}

@@ -1449,6 +1449,40 @@
               }
             }
           ]
+        },
+        {
+          "name": "List SMWS Codes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/tasteep/smws-codes",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "smws-codes"
+              ]
+            },
+            "description": "Every live SMWS code for the offline copy: `{ version, items }`. `version` is the hex SHA-256 of `JSON.stringify(items)`, so the app can re-hash its stored copy to check it. Send the returned `ETag` back as `If-None-Match` to get a bodyless `304`."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('has a version and at least the seeded codes', () => { pm.expect(body.version).to.match(/^[0-9a-f]{64}$/); pm.expect(body.items.length).to.be.at.least(240); });",
+                  "pm.test('items have the exact shape', () => pm.expect(Object.keys(body.items[0]).sort()).to.eql(['category', 'code', 'distillery_name', 'extra', 'region', 'region_id']));",
+                  "pm.test('ETag carries the version', () => pm.expect(pm.response.headers.get('ETag')).to.eql(`W/\"${body.version}\"`));"
+                ]
+              }
+            }
+          ]
         }
       ],
       "auth": {
@@ -2063,6 +2097,287 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List SMWS codes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/smws-codes?category=single malt&limit=20",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "smws-codes"
+              ],
+              "query": [
+                {
+                  "key": "category",
+                  "value": "single malt"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Paginated (`limit`, `offset`), filter by `q` (code, distillery, extra), `category` (exact key) and `include_deleted=true`."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('is a page', () => pm.expect(pm.response.json().total).to.be.a('number'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SMWS codes diff (table vs JSON)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/smws-codes/diff",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "smws-codes",
+                "diff"
+              ]
+            },
+            "description": "Where `tasteep_smws_codes` and `src/tasteep/data/smws-codes.json` disagree: `only_in_json` (inserted on next boot), `only_in_table`, `deleted_in_table`, `changed` (per-field values)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('has in_sync', () => pm.expect(pm.response.json().in_sync).to.be.a('boolean'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Export SMWS codes as JSON",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/smws-codes/export",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "smws-codes",
+                "export"
+              ]
+            },
+            "description": "The table in the seed file format. Save over `src/tasteep/data/smws-codes.json` and commit to bring the file in line with dashboard edits."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('has single malts', () => pm.expect(pm.response.json()['single malt'].distilleries).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create SMWS code",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/admin/smws-codes",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "smws-codes"
+              ]
+            },
+            "description": "`region_id` absent \u2192 resolved from `region`. `409` if the code is live; a deleted code is revived with these values.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"ZZ9999\",\n  \"distillery_name\": \"Postman Distillery\",\n  \"category\": \"single malt\",\n  \"region\": \"Islay\",\n  \"extra\": null\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('linked Islay', () => pm.expect(pm.response.json().region_id).to.eql('scotland/islay'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update SMWS code",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/admin/smws-codes/ZZ9999",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "smws-codes",
+                "ZZ9999"
+              ]
+            },
+            "description": "Absent keys unchanged. Changing `region` without `region_id` re-resolves the link; `region_id: null` unlinks.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"extra\": \"Closed\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('updated', () => pm.expect(pm.response.json().extra).to.eql('Closed'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete SMWS code",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/smws-codes/ZZ9999",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "smws-codes",
+                "ZZ9999"
+              ]
+            },
+            "description": "Soft delete: the code leaves `GET /tasteep/smws-codes` and the boot seed will not re-add it. Undo with restore."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Restore SMWS code",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/smws-codes/ZZ9999/restore",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "smws-codes",
+                "ZZ9999",
+                "restore"
+              ]
+            },
+            "description": "Brings a soft-deleted code back."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('live again', () => pm.expect(pm.response.json().deleted_at).to.eql(null));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete SMWS code (cleanup)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/smws-codes/ZZ9999",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "smws-codes",
+                "ZZ9999"
+              ]
+            },
+            "description": "Leaves the Postman test code soft-deleted, so it is out of the app list. Re-running Create revives it."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 204', () => pm.response.to.have.status(204));"
                 ]
               }
             }

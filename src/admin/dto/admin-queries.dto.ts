@@ -59,3 +59,20 @@ export class LogsQueryDto {
   @IsInt()
   limit?: number;
 }
+
+export class SmwsCodesQueryDto extends PaginationQueryDto {
+  /** Substring match on code, distillery name or extra. */
+  @IsOptional()
+  @IsString()
+  q?: string;
+
+  /** Exact category key, e.g. `single malt`. */
+  @IsOptional()
+  @IsString()
+  category?: string;
+
+  /** Also list soft-deleted codes (they carry a `deleted_at`). */
+  @IsOptional()
+  @QueryBoolean()
+  include_deleted?: boolean;
+}
