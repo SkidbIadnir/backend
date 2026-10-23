@@ -281,4 +281,26 @@ describe('TasteepAuthService', () => {
       expect(displayNameFromEmail('nina.j@example.com')).toBe('nina.j');
     });
   });
+  describe('admin revocation', () => {
+    it('revokeSession revokes only a live session and reports whether it did', async () => {
+      sessionRepo.update!.mockResolvedValue({ affected: 1 });
+      await expect(service.revokeSession(SESSION_ID)).resolves.toBe(true);
+      expect(sessionRepo.update).toHaveBeenCalledWith(
+        { id: SESSION_ID, revokedAt: IsNull() },
+        { revokedAt: expect.any(Date) },
+      );
+
+      sessionRepo.update!.mockResolvedValue({ affected: 0 });
+      await expect(service.revokeSession(SESSION_ID)).resolves.toBe(false);
+    });
+
+    it('revokeAllForUser returns how many live sessions it revoked', async () => {
+      sessionRepo.update!.mockResolvedValue({ affected: 3 });
+      await expect(service.revokeAllForUser(USER_ID)).resolves.toBe(3);
+      expect(sessionRepo.update).toHaveBeenCalledWith(
+        { userId: USER_ID, revokedAt: IsNull() },
+        { revokedAt: expect.any(Date) },
+      );
+    });
+  });
 });

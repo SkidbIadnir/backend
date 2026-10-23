@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AdminModule } from './admin/admin.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { SmwsModule } from './smws/smws.module';
@@ -12,6 +13,7 @@ import { TasteepModule } from './tasteep/tasteep.module';
  *
  *  - `SmwsModule`     → `src/smws/`     tables `smws_*`                   routes `/smws/*`
  *  - `TasteepModule`  → `src/tasteep/`  tables `tasteep_*`                routes `/auth/*`, `/tasteep/*`
+ *  - `AdminModule`    → `src/admin/`    reads both projects' tables       routes `/admin/*` (dashboard API)
  *
  * Entities are registered by each feature module (`autoLoadEntities`), so there
  * is no central entity list to keep in sync.
@@ -38,6 +40,7 @@ import { TasteepModule } from './tasteep/tasteep.module';
     ScheduleModule.forRoot(),
     SmwsModule,
     TasteepModule,
+    AdminModule,
   ],
   controllers: [AppController],
   providers: [AppService],

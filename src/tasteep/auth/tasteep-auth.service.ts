@@ -120,6 +120,25 @@ export class TasteepAuthService {
     );
   }
 
+  /** Admin: revoke one session by id. Returns whether a live session was revoked. */
+  async revokeSession(sessionId: string): Promise<boolean> {
+    // Never put `undefined` in update criteria (see signOut).
+    const result = await this.sessionRepo.update(
+      { id: sessionId, revokedAt: IsNull() },
+      { revokedAt: new Date() },
+    );
+    return (result.affected ?? 0) > 0;
+  }
+
+  /** Admin: revoke every live session of a user. Returns how many were revoked. */
+  async revokeAllForUser(userId: string): Promise<number> {
+    const result = await this.sessionRepo.update(
+      { userId, revokedAt: IsNull() },
+      { revokedAt: new Date() },
+    );
+    return result.affected ?? 0;
+  }
+
   /** Called by the JWT strategy on every authenticated request. */
   async isSessionActive(
     sessionId: string,

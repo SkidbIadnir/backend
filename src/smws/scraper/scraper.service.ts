@@ -4,7 +4,7 @@ import { In, Repository } from 'typeorm';
 import { SmwsLive } from '../entities/smws-live.entity';
 import { SmwsArchive } from '../entities/smws-archive.entity';
 import { SmwsDistillery } from '../entities/smws-distillery.entity';
-import { firefox, Browser, Page } from 'playwright';
+import { firefox, Browser, BrowserContext, Page } from 'playwright';
 
 export interface ScrapedWhiskyData {
   name: string;
@@ -41,6 +41,19 @@ export interface ScrapedWhiskyListItem {
   href: string;
 }
 
+export interface ScraperRunState {
+  running: boolean;
+  lastStartedAt: Date | null;
+  lastFinishedAt: Date | null;
+  lastError: string | null;
+}
+
+const emptyRunRecord = () => ({
+  lastStartedAt: null as Date | null,
+  lastFinishedAt: null as Date | null,
+  lastError: null as string | null,
+});
+
 @Injectable()
 export class ScraperService {
   private readonly logger = new Logger(ScraperService.name);
@@ -50,6 +63,8 @@ export class ScraperService {
   private readonly maxPageErrorRetries = 2;
   private isLiveScraperRunning = false;
   private isArchiveScraperRunning = false;
+  private readonly liveRun = emptyRunRecord();
+  private readonly archiveRun = emptyRunRecord();
 
   constructor(
     @InjectRepository(SmwsLive)
@@ -316,6 +331,14 @@ export class ScraperService {
     return detailedWhiskies;
   }
 
+  /** Snapshot for the admin dashboard; covers both cron and manual runs. */
+  getRunState(): { live: ScraperRunState; archive: ScraperRunState } {
+    return {
+      live: { running: this.isLiveScraperRunning, ...this.liveRun },
+      archive: { running: this.isArchiveScraperRunning, ...this.archiveRun },
+    };
+  }
+
   async runScraper(): Promise<void> {
     if (this.isLiveScraperRunning) {
       this.logger.warn(
@@ -324,17 +347,21 @@ export class ScraperService {
       return;
     }
     this.isLiveScraperRunning = true;
+    this.liveRun.lastStartedAt = new Date();
+    this.liveRun.lastError = null;
     this.logger.log('=== STARTING SMWS SCRAPER ===');
 
-    const browser = await this.initBrowser();
-    const context = await browser.newContext({
-      ignoreHTTPSErrors: true,
-      userAgent:
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:145.0) Gecko/20100101 Firefox/145.0',
-    });
-    const page = await context.newPage();
-
+    // Set up inside the try so a failed browser launch still clears the running flag.
+    let context: BrowserContext | undefined;
     try {
+      const browser = await this.initBrowser();
+      context = await browser.newContext({
+        ignoreHTTPSErrors: true,
+        userAgent:
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:145.0) Gecko/20100101 Firefox/145.0',
+      });
+      const page = await context.newPage();
+
       this.logger.log('Step 1: Navigating to SMWS...');
       await page.goto('https://smws.eu/all-whisky', {
         waitUntil: 'domcontentloaded',
@@ -403,11 +430,12 @@ export class ScraperService {
         `=== SCRAPER COMPLETED — new: ${newWhiskies.length}, saved: ${savedWhiskies.length}, unavailable: ${removedWhiskies.length} ===`,
       );
     } catch (error) {
+      this.liveRun.lastError = error.message;
       this.logger.error(`Scraper error: ${error.message}`);
     } finally {
-      await page.close();
-      await context.close();
+      await context?.close(); // also closes its pages
       await this.closeBrowser();
+      this.liveRun.lastFinishedAt = new Date();
       this.isLiveScraperRunning = false;
     }
   }
@@ -781,17 +809,21 @@ export class ScraperService {
       return;
     }
     this.isArchiveScraperRunning = true;
+    this.archiveRun.lastStartedAt = new Date();
+    this.archiveRun.lastError = null;
     this.logger.log('=== STARTING SMWS ARCHIVE SCRAPER ===');
 
-    const browser = await this.initBrowser();
-    const context = await browser.newContext({
-      ignoreHTTPSErrors: true,
-      userAgent:
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:145.0) Gecko/20100101 Firefox/145.0',
-    });
-    const page = await context.newPage();
-
+    // Set up inside the try so a failed browser launch still clears the running flag.
+    let context: BrowserContext | undefined;
     try {
+      const browser = await this.initBrowser();
+      context = await browser.newContext({
+        ignoreHTTPSErrors: true,
+        userAgent:
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:145.0) Gecko/20100101 Firefox/145.0',
+      });
+      const page = await context.newPage();
+
       this.logger.log('Step 1: Navigating to SMWS Archive...');
       await page.goto('https://smws.eu/archive', {
         waitUntil: 'domcontentloaded',
@@ -843,11 +875,12 @@ export class ScraperService {
         `=== ARCHIVE SCRAPER COMPLETED — new: ${newWhiskies.length}, saved: ${savedCount} ===`,
       );
     } catch (error) {
+      this.archiveRun.lastError = error.message;
       this.logger.error(`Archive scraper error: ${error.message}`);
     } finally {
-      await page.close();
-      await context.close();
+      await context?.close(); // also closes its pages
       await this.closeBrowser();
+      this.archiveRun.lastFinishedAt = new Date();
       this.isArchiveScraperRunning = false;
     }
   }
