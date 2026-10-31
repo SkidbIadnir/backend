@@ -116,6 +116,8 @@ export const makeRegion = (
   lat: 55.78,
   lon: -6.25,
   sortOrder: 1,
+  aliases: [],
+  deletedAt: null,
   ...overrides,
 });
 
@@ -220,5 +222,6 @@ export const makeDistilleryLocation = (
   precision: 'exact',
   createdAt: new Date('2024-01-01'),
   updatedAt: new Date('2024-01-01'),
+  deletedAt: null,
   ...overrides,
 });

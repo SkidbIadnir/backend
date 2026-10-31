@@ -1,5 +1,5 @@
 {
-  "_comment": "Seed for tasteep_regions. `main` is a country/top-level producing region, `sub` its whisky-relevant subregions (empty when the country is the only meaningful choice). lat/lon are approximate centroids used as the Atlas fallback pin when a tasting has no resolved location. Loaded at boot by RegionsService.seed(); rows are upserted by slug, never deleted.",
+  "_comment": "Seed for tasteep_regions. `main` is a country/top-level producing region, `sub` its whisky-relevant subregions (empty when the country is the only meaningful choice). lat/lon are approximate centroids used as the Atlas fallback pin when a tasting has no resolved location. `aliases` (optional) are other spellings free text may use. Loaded at boot by RegionsService.seed(), which inserts only ids the table does not have yet: once a row exists, edit it from the admin dashboard (/admin/regions) and refresh this file with GET /admin/regions/export.",
   "regions": [
     {
       "main": "Scotland",
@@ -9,8 +9,8 @@
         { "name": "Speyside", "lat": 57.45, "lon": -3.15 },
         { "name": "Islay", "lat": 55.78, "lon": -6.25 },
         { "name": "Orkney", "lat": 59.0, "lon": -3.0 },
-        { "name": "Lowland", "lat": 55.75, "lon": -3.8 },
-        { "name": "Highland", "lat": 57.3, "lon": -4.5 },
+        { "name": "Lowland", "lat": 55.75, "lon": -3.8, "aliases": ["Lowlands"] },
+        { "name": "Highland", "lat": 57.3, "lon": -4.5, "aliases": ["Highlands"] },
         { "name": "Campbeltown", "lat": 55.43, "lon": -5.6 },
         { "name": "Islands", "lat": 57.0, "lon": -6.3 }
       ]
@@ -47,6 +47,7 @@
       "main": "United States",
       "lat": 39.8,
       "lon": -98.55,
+      "aliases": ["USA", "US", "United States of America"],
       "sub": [
         { "name": "Kentucky", "lat": 37.85, "lon": -85.5 },
         { "name": "Washington", "lat": 47.4, "lon": -120.5 },

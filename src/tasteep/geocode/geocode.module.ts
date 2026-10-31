@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { HttpModule } from '@nestjs/axios';
 import { TasteepGeocodeCache } from '../entities/tasteep-geocode-cache.entity';
 import { TasteepDistilleryLocation } from '../entities/tasteep-distillery-location.entity';
+import { TasteepTasting } from '../entities/tasteep-tasting.entity';
 import { TasteepAuthModule } from '../auth/tasteep-auth.module';
 import { GeocodeService, NOMINATIM_MIN_INTERVAL_MS } from './geocode.service';
 import { GeocodeController } from './geocode.controller';
@@ -12,7 +13,11 @@ import { DistilleryLocationsService } from './distillery-locations.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([TasteepGeocodeCache, TasteepDistilleryLocation]),
+    TypeOrmModule.forFeature([
+      TasteepGeocodeCache,
+      TasteepDistilleryLocation,
+      TasteepTasting,
+    ]),
     HttpModule,
     TasteepAuthModule,
   ],
@@ -26,5 +31,6 @@ import { DistilleryLocationsService } from './distillery-locations.service';
     GeocodeService,
   ],
   controllers: [GeocodeController],
+  exports: [DistilleryLocationsService],
 })
 export class GeocodeModule {}

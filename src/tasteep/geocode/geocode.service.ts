@@ -27,7 +27,9 @@ export { normalizeQuery };
 /**
  * Cache-first geocoding. Every query hits `tasteep_geocode_cache` before
  * Nominatim, misses are cached as `unknown` so they are never retried, and
- * identical in-flight queries share one upstream request.
+ * identical in-flight queries share one upstream request. The only thing that
+ * evicts cache rows is an edit to a curated distillery location (see
+ * `DistilleryLocationsService.clearCache`).
  */
 @Injectable()
 export class GeocodeService {

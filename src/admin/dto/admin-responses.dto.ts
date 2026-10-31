@@ -222,3 +222,67 @@ export class SmwsCodesDiffJson {
   /** In both, with different values. */
   changed: SmwsCodeChange[];
 }
+
+export class AdminDistilleryLocationJson {
+  id: string;
+  name: string;
+  lat: number;
+  lon: number;
+  precision: 'exact' | 'region' | 'country';
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+export class AdminDistilleryLocationPage {
+  items: AdminDistilleryLocationJson[];
+  total: number;
+}
+/** Create, update and restore: the row plus how many geocode cache rows the write evicted. */
+export class AdminDistilleryLocationWriteJson extends AdminDistilleryLocationJson {
+  cache_cleared: number;
+}
+export class DistilleryLocationDeletedJson {
+  cache_cleared: number;
+}
+export class DistilleryLocationAppliedJson {
+  id: string;
+  /** Unplaced tastings that now carry this location. */
+  updated: number;
+}
+
+export class SeedFieldDiff {
+  field: string;
+  json: string | number | string[] | null;
+  table: string | number | string[] | null;
+}
+export class SeedRowChange {
+  id: string;
+  fields: SeedFieldDiff[];
+}
+/** Table vs bundled seed file, keyed on id. Same meaning as `SmwsCodesDiffJson`. */
+export class SeedDiffJson {
+  in_sync: boolean;
+  only_in_json: string[];
+  only_in_table: string[];
+  deleted_in_table: string[];
+  changed: SeedRowChange[];
+}
+
+export class AdminRegionRowJson {
+  id: string;
+  name: string;
+  parent_id: string | null;
+  lat: number | null;
+  lon: number | null;
+  sort_order: number;
+  aliases: string[];
+  deleted_at: string | null;
+}
+/** Counts are of rows linking to this node directly, not to its subregions. */
+export class AdminRegionNodeJson extends AdminRegionRowJson {
+  tasting_count: number;
+  smws_code_count: number;
+}
+export class AdminRegionTreeJson extends AdminRegionNodeJson {
+  subregions: AdminRegionNodeJson[];
+}

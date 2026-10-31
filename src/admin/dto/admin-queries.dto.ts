@@ -76,3 +76,22 @@ export class SmwsCodesQueryDto extends PaginationQueryDto {
   @QueryBoolean()
   include_deleted?: boolean;
 }
+
+export class DistilleryLocationsQueryDto extends PaginationQueryDto {
+  /** Substring match on name or id. */
+  @IsOptional()
+  @IsString()
+  q?: string;
+
+  /** Also list soft-deleted rows (they carry a `deleted_at`). */
+  @IsOptional()
+  @QueryBoolean()
+  include_deleted?: boolean;
+}
+
+export class RegionsQueryDto {
+  /** Also include soft-deleted rows (they carry a `deleted_at`). */
+  @IsOptional()
+  @QueryBoolean()
+  include_deleted?: boolean;
+}

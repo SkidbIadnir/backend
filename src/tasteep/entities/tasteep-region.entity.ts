@@ -1,5 +1,6 @@
 import {
   Column,
+  DeleteDateColumn,
   Entity,
   Index,
   JoinColumn,
@@ -22,6 +23,10 @@ import {
  *
  * `lat`/`lon` are an approximate centroid: the Atlas uses them as a fallback
  * pin for tastings whose own location could not be resolved.
+ *
+ * Edited from the admin dashboard; the boot seed only inserts missing ids.
+ * Deletes are soft (`deleted_at`): the row leaves the picker and free-text
+ * matching, but tastings and SMWS codes keep pointing at it.
  */
 @Entity('tasteep_regions')
 @Index('tasteep_regions_parent_idx', ['parentId'])
@@ -48,4 +53,15 @@ export class TasteepRegion {
   /** Display order within the parent (seed order). */
   @Column({ name: 'sort_order', type: 'smallint', default: 0 })
   sortOrder: number;
+
+  /**
+   * Other spellings `RegionsService.resolve` matches (`Highlands`, `USA`).
+   * `NULL` means never set: the boot seed fills those from `region.json`, so
+   * an empty list set from the dashboard stays empty.
+   */
+  @Column({ type: 'text', array: true, nullable: true })
+  aliases: string[] | null;
+
+  @DeleteDateColumn({ name: 'deleted_at', type: 'timestamptz', nullable: true })
+  deletedAt: Date | null;
 }

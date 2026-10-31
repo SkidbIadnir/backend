@@ -191,9 +191,12 @@ subregions (empty list when the country is the only sensible choice).
   `country`-precision one; only a real `PUT …/location` takes it off the shelf.
 - The response carries a weak `ETag`. Send it back as `If-None-Match` to get `304` with no
   body; fetch once per app start and cache.
-- Source of truth is `src/tasteep/data/region.json`, upserted into `tasteep_regions` at
-  boot. Editing the file and restarting adds/updates rows; nothing is deleted
-  automatically.
+- The table is edited from the admin dashboard (`/admin/regions`). `src/tasteep/data/region.json`
+  only seeds it: at boot, ids the table doesn't have yet are inserted, existing and deleted rows
+  are left alone. A deleted region drops out of this list, but tastings that already carry its
+  `region_id` keep it, and sending that id back on `PUT` is still accepted.
+- Typed `region` text is matched against names and each region's `aliases` (`USA`,
+  `Highlands`…); renaming a region in the dashboard keeps the old name as an alias.
 
 ---
 

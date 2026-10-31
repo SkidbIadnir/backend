@@ -1,13 +1,18 @@
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
+import { IsNull } from 'typeorm';
 import {
   normalizeName,
   RegionsService,
+  renamedAliases,
   seedRows,
   slugify,
+  toSeedFile,
 } from './regions.service';
 import { TasteepRegion } from '../entities/tasteep-region.entity';
+import { TasteepSmwsCode } from '../entities/tasteep-smws-code.entity';
+import { TasteepTasting } from '../entities/tasteep-tasting.entity';
 import {
   createMockRepository,
   MockRepository,
@@ -59,6 +64,59 @@ describe('regions helpers', () => {
     expect(rows[2]).toMatchObject({ parentId: null, sortOrder: 1 });
   });
 
+  it('seedRows takes explicit ids and aliases', () => {
+    const rows = seedRows({
+      regions: [
+        {
+          id: 'usa',
+          main: 'United States',
+          lat: 1,
+          lon: 2,
+          aliases: ['USA'],
+          sub: [{ id: 'usa/ky', name: 'Kentucky', lat: 3, lon: 4 }],
+        },
+      ],
+    });
+    expect(rows).toEqual([
+      expect.objectContaining({ id: 'usa', aliases: ['USA'] }),
+      expect.objectContaining({ id: 'usa/ky', parentId: 'usa', aliases: [] }),
+    ]);
+  });
+
+  it('toSeedFile round-trips the real seed file', () => {
+    const file = regionData as RegionSeedFile;
+    const rows = seedRows(file).map((r) => makeRegion(r));
+    expect(toSeedFile(rows, file)).toEqual({
+      _comment: file._comment,
+      regions: file.regions,
+    });
+  });
+
+  it('toSeedFile writes the id when a rename made it differ from the name', () => {
+    const file = toSeedFile(
+      [
+        makeRegion({ id: 'scotland', name: 'Alba', parentId: null }),
+        makeRegion({ id: 'scotland/islay', name: 'Ile', parentId: 'scotland' }),
+      ],
+      { regions: [] },
+    );
+    expect(file.regions[0]).toMatchObject({ id: 'scotland', main: 'Alba' });
+    expect(file.regions[0].sub[0]).toMatchObject({
+      id: 'scotland/islay',
+      name: 'Ile',
+    });
+  });
+
+  it('renamedAliases keeps the old name and drops the new one', () => {
+    expect(renamedAliases(['Highlands'], 'Highland', 'Highlands')).toEqual([
+      'Highland',
+    ]);
+    expect(renamedAliases([], 'Islay', 'ISLAY')).toEqual([]);
+    expect(renamedAliases(['islay'], 'Islay', 'Isle of Islay')).toEqual([
+      'islay',
+    ]);
+  });
+
   it('the real seed file has unique ids and a centroid on every row', () => {
     const rows = seedRows(regionData as RegionSeedFile);
     const ids = rows.map((r) => r.id);
@@ -91,14 +149,33 @@ describe('RegionsService', () => {
       providers: [
         RegionsService,
         { provide: getRepositoryToken(TasteepRegion), useValue: repo },
+        {
+          provide: getRepositoryToken(TasteepTasting),
+          useValue: createMockRepository(),
+        },
+        {
+          provide: getRepositoryToken(TasteepSmwsCode),
+          useValue: createMockRepository(),
+        },
       ],
     }).compile();
     service = module.get(RegionsService);
   });
 
   describe('seed', () => {
-    it('upserts parents before children, keyed on id', async () => {
-      repo.upsert!.mockResolvedValue(undefined);
+    let insertQb: Record<string, jest.Mock>;
+    beforeEach(() => {
+      insertQb = {
+        insert: jest.fn().mockReturnThis(),
+        values: jest.fn().mockReturnThis(),
+        orIgnore: jest.fn().mockReturnThis(),
+        execute: jest.fn().mockResolvedValue({}),
+      };
+      repo.createQueryBuilder!.mockReturnValue(insertQb);
+    });
+
+    it('inserts missing parents before missing children', async () => {
+      repo.find!.mockResolvedValue([]);
       const n = await service.seed({
         regions: [
           {
@@ -110,23 +187,65 @@ describe('RegionsService', () => {
         ],
       });
       expect(n).toBe(2);
-      expect(repo.upsert).toHaveBeenCalledTimes(2);
-      const calls = repo.upsert!.mock.calls as [TasteepRegion[], string[]][];
-      expect(calls[0][0]).toEqual([
-        expect.objectContaining({ id: 'scotland', parentId: null }),
-      ]);
-      expect(calls[0][1]).toEqual(['id']);
-      expect(calls[1][0]).toEqual([
-        expect.objectContaining({ id: 'scotland/islay', parentId: 'scotland' }),
+      expect(repo.find).toHaveBeenCalledWith({ withDeleted: true });
+      expect(insertQb.values.mock.calls).toEqual([
+        [[expect.objectContaining({ id: 'scotland', parentId: null })]],
+        [
+          [
+            expect.objectContaining({
+              id: 'scotland/islay',
+              parentId: 'scotland',
+            }),
+          ],
+        ],
       ]);
     });
 
-    it('skips the child upsert when there are none', async () => {
-      repo.upsert!.mockResolvedValue(undefined);
-      await service.seed({
-        regions: [{ main: 'Sweden', lat: 1, lon: 2, sub: [] }],
+    it('leaves existing and soft-deleted rows alone, and the children of a deleted country', async () => {
+      repo.find!.mockResolvedValue([
+        makeRegion({
+          id: 'scotland',
+          parentId: null,
+          deletedAt: new Date(),
+          aliases: [],
+        }),
+        makeRegion({ id: 'sweden', parentId: null, aliases: ['Sverige'] }),
+      ]);
+      const n = await service.seed({
+        regions: [
+          {
+            main: 'Scotland',
+            lat: 1,
+            lon: 2,
+            sub: [{ name: 'Islay', lat: 3, lon: 4 }],
+          },
+          { main: 'Sweden', lat: 1, lon: 2, sub: [] },
+        ],
       });
-      expect(repo.upsert).toHaveBeenCalledTimes(1);
+      expect(n).toBe(0);
+      expect(insertQb.insert).not.toHaveBeenCalled();
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('fills aliases that were never set', async () => {
+      repo.find!.mockResolvedValue([
+        makeRegion({ id: 'united-states', parentId: null, aliases: null }),
+      ]);
+      await service.seed({
+        regions: [
+          {
+            main: 'United States',
+            lat: 1,
+            lon: 2,
+            aliases: ['USA'],
+            sub: [],
+          },
+        ],
+      });
+      expect(repo.update).toHaveBeenCalledWith(
+        { id: 'united-states', aliases: IsNull() },
+        { aliases: ['USA'] },
+      );
     });
   });
 
@@ -134,9 +253,6 @@ describe('RegionsService', () => {
     it('nests subregions under their country in seed order', async () => {
       repo.find!.mockResolvedValue(makeRegionRows());
       const tree = await service.tree();
-      expect(repo.find).toHaveBeenCalledWith({
-        order: { sortOrder: 'ASC', name: 'ASC' },
-      });
       expect(tree).toEqual([
         {
           id: 'scotland',
@@ -167,6 +283,7 @@ describe('RegionsService', () => {
       expect(row?.id).toBe('scotland/islay');
       expect(repo.findOne).toHaveBeenCalledWith({
         where: { id: 'scotland/islay' },
+        withDeleted: true,
       });
       expect(repo.find).not.toHaveBeenCalled();
     });
@@ -194,14 +311,19 @@ describe('RegionsService', () => {
       );
     });
 
-    it('knows a few common aliases', async () => {
+    it('matches aliases stored on the rows', async () => {
       repo.find!.mockResolvedValue([
         ...makeRegionRows(),
-        makeRegion({ id: 'scotland/highland', name: 'Highland' }),
+        makeRegion({
+          id: 'scotland/highland',
+          name: 'Highland',
+          aliases: ['Highlands'],
+        }),
         makeRegion({
           id: 'united-states',
           name: 'United States',
           parentId: null,
+          aliases: ['USA', 'US'],
         }),
       ]);
       expect((await service.resolve(null, 'Highlands'))?.id).toBe(
@@ -214,6 +336,94 @@ describe('RegionsService', () => {
       expect(await service.resolve(null, null)).toBeNull();
       expect(await service.resolve(null, '   ')).toBeNull();
       expect(await service.resolve(null, "Grandma's cellar")).toBeNull();
+    });
+  });
+
+  describe('create', () => {
+    it('builds a subregion id under a live country', async () => {
+      repo
+        .findOne!.mockResolvedValueOnce(
+          makeRegion({ id: 'scotland', parentId: null }),
+        )
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(
+          makeRegion({ id: 'scotland/arran', name: 'Arran' }),
+        );
+      repo.createQueryBuilder!.mockReturnValue({
+        withDeleted: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValue({ max: 6 }),
+      });
+      const row = await service.create({
+        name: 'Arran',
+        parent_id: 'scotland',
+      });
+      expect(row.id).toBe('scotland/arran');
+      expect(repo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'scotland/arran',
+          parentId: 'scotland',
+          sortOrder: 7,
+          aliases: [],
+          deletedAt: null,
+        }),
+      );
+    });
+
+    it('refuses a subregion of a subregion', async () => {
+      repo.findOne!.mockResolvedValueOnce(makeRegion());
+      await expect(
+        service.create({ name: 'Port Ellen', parent_id: 'scotland/islay' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('409s when the id is live', async () => {
+      repo.findOne!.mockResolvedValueOnce(
+        makeRegion({ id: 'sweden', parentId: null }),
+      );
+      await expect(service.create({ name: 'Sweden' })).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+    });
+  });
+
+  describe('update', () => {
+    it('keeps the old name as an alias on rename', async () => {
+      repo.findOne!.mockResolvedValue(makeRegion());
+      await service.update('scotland/islay', { name: 'Isle of Islay' });
+      expect(repo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'Isle of Islay', aliases: ['Islay'] }),
+      );
+    });
+  });
+
+  describe('reorder', () => {
+    beforeEach(() =>
+      repo.find!.mockResolvedValue(
+        makeRegionRows().filter((r) => r.parentId === null),
+      ),
+    );
+
+    it('400s unless ids lists every live sibling once', async () => {
+      for (const ids of [['scotland'], ['scotland', 'sweden', 'sweden']]) {
+        await expect(
+          service.reorder({ parent_id: null, ids }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+      }
+    });
+
+    it('writes sort_order from the position', async () => {
+      const em = { update: jest.fn() };
+      repo.manager = {
+        transaction: jest.fn((fn: (m: typeof em) => unknown) => fn(em)),
+      } as never;
+      jest.spyOn(service, 'adminTree').mockResolvedValue([]);
+      await service.reorder({ parent_id: null, ids: ['sweden', 'scotland'] });
+      expect(em.update.mock.calls).toEqual([
+        [TasteepRegion, { id: 'sweden' }, { sortOrder: 0 }],
+        [TasteepRegion, { id: 'scotland' }, { sortOrder: 1 }],
+      ]);
     });
   });
 });

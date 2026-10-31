@@ -2382,6 +2382,202 @@
               }
             }
           ]
+        },
+        {
+          "name": "List distillery locations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/distillery-locations?limit=20",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "distillery-locations"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Curated distillery coordinates checked before Nominatim. Paginated (`limit`, `offset`), `q` (name or id), `include_deleted=true`. Writes (POST, PATCH /:id, DELETE /:id, POST /:id/restore) return `cache_cleared`: the geocode cache rows the name matched, evicted so the next lookup hits the curated row. POST /:id/apply places unplaced tastings whose distillery matches."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('is a page', () => pm.expect(pm.response.json().total).to.be.a('number'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Distillery locations diff (table vs JSON)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/distillery-locations/diff",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "distillery-locations",
+                "diff"
+              ]
+            },
+            "description": "Where `tasteep_distillery_locations` and `src/tasteep/data/distillery-location.json` disagree."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('has in_sync', () => pm.expect(pm.response.json().in_sync).to.be.a('boolean'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Export distillery locations as JSON",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/distillery-locations/export",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "distillery-locations",
+                "export"
+              ]
+            },
+            "description": "The table in the seed file format. Save over `src/tasteep/data/distillery-location.json` and commit."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('has distilleries', () => pm.expect(pm.response.json().distilleries).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Region tree with usage counts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/regions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "regions"
+              ]
+            },
+            "description": "Same tree as `GET /tasteep/regions` plus `parent_id`, `sort_order`, `aliases`, `deleted_at`, `tasting_count`, `smws_code_count` (direct links only). `include_deleted=true` adds soft-deleted rows. Subregion ids contain `/`: URL-encode them in PATCH/DELETE/restore paths."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('is a tree', () => pm.expect(pm.response.json()[0].subregions).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Regions diff (table vs JSON)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/regions/diff",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "regions",
+                "diff"
+              ]
+            },
+            "description": "Where `tasteep_regions` and `src/tasteep/data/region.json` disagree (name, lat, lon, aliases; order is not compared)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('has in_sync', () => pm.expect(pm.response.json().in_sync).to.be.a('boolean'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Export regions as JSON",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/regions/export",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "regions",
+                "export"
+              ]
+            },
+            "description": "The table in the seed file format. Save over `src/tasteep/data/region.json` and commit."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('has regions', () => pm.expect(pm.response.json().regions).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
         }
       ]
     }
