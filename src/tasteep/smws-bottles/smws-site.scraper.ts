@@ -35,6 +35,8 @@ export interface ScrapedBottle {
   abvText: string;
   age: string;
   caskType: string;
+  /** As displayed, `dd/mm/yyyy`. */
+  distilledText: string;
   profile: string;
   regionText: string;
 }
@@ -207,7 +209,9 @@ export class SmwsSiteScraper {
         priceText: getText('.price--withTax'),
         abvText: getInfoValue('ABV'),
         age: getInfoValue('Age'),
-        caskType: getInfoValue('CASK TYPE'),
+        // The page labels it `CASK`; `CASK TYPE` kept in case the label changes back.
+        caskType: getInfoValue('CASK') || getInfoValue('CASK TYPE'),
+        distilledText: getInfoValue('DISTILLED DATE'),
         profile: getInfoValue('PROFILE'),
         regionText: getInfoValue('REGION'),
       };

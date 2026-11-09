@@ -101,6 +101,10 @@ export class TasteepSmwsBottle {
   @Column({ name: 'cask_type', type: 'text', nullable: true })
   caskType: string | null;
 
+  /** `YYYY-MM-DD` (Postgres `date`, returned as a string). */
+  @Column({ name: 'distilled_date', type: 'date', nullable: true })
+  distilledDate: string | null;
+
   /** SMWS flavour profile, e.g. `Juicy, oak & vanilla`. */
   @Column({ type: 'text', nullable: true })
   profile: string | null;

@@ -1,6 +1,7 @@
 import {
   normalizeProductUrl,
   parseAbv,
+  parseDistilledDate,
   parsePrice,
   splitSmwsCode,
 } from './smws-bottle.parse';
@@ -64,5 +65,19 @@ describe('parseAbv', () => {
     ['158%', null],
   ])('%s', (text, expected) => {
     expect(parseAbv(text)).toBe(expected);
+  });
+});
+
+describe('parseDistilledDate', () => {
+  it.each([
+    ['25/01/2012', '2012-01-25'],
+    [' 5/9/2008 ', '2008-09-05'],
+    ['29/02/2012', '2012-02-29'],
+    ['31/02/2012', null],
+    ['2012-01-25', null],
+    ['', null],
+    [undefined, null],
+  ])('%s', (text, expected) => {
+    expect(parseDistilledDate(text)).toBe(expected);
   });
 });

@@ -10,6 +10,7 @@ import {
 import { RegionsService } from '../regions/regions.service';
 import {
   parseAbv,
+  parseDistilledDate,
   parsePrice,
   splitSmwsCode,
   textOrNull,
@@ -43,6 +44,7 @@ export type FreshBottle = Pick<
   | 'abv'
   | 'age'
   | 'caskType'
+  | 'distilledDate'
   | 'profile'
   | 'regionText'
   | 'regionId'
@@ -293,6 +295,7 @@ export class SmwsBottleSyncService implements OnModuleInit {
         abv: parseAbv(page.abvText),
         age: textOrNull(page.age),
         caskType: textOrNull(page.caskType),
+        distilledDate: parseDistilledDate(page.distilledText),
         profile: textOrNull(page.profile),
         regionText,
         regionId:

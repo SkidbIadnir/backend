@@ -20,6 +20,8 @@ export interface SmwsBottleJson {
   abv: number | null;
   age: string | null;
   cask_type: string | null;
+  /** `YYYY-MM-DD`. */
+  distilled_date: string | null;
   profile: string | null;
   available: boolean;
   first_seen_at: string;
@@ -51,6 +53,7 @@ export function toSmwsBottleJson(b: TasteepSmwsBottle): SmwsBottleJson {
     abv: b.abv,
     age: b.age,
     cask_type: b.caskType,
+    distilled_date: b.distilledDate,
     profile: b.profile,
     available: b.delistedAt === null,
     first_seen_at: b.firstSeenAt.toISOString(),
