@@ -16,8 +16,11 @@ import {
   textOrNull,
 } from './smws-bottle.parse';
 import {
+  applyStockChecks,
   DEFAULT_SYNC_RULES,
   planSync,
+  StockCheck,
+  stockCheckCandidates,
   SyncPlan,
   SyncRules,
 } from './smws-bottle-sync.rules';
@@ -29,6 +32,8 @@ import {
 
 /** Session-level Postgres advisory lock: one scrape at a time across every process on the database. */
 const SCRAPE_LOCK_KEY = 727_455_001;
+/** Page checks per run; beyond this the plain miss rule applies. */
+const MAX_STOCK_CHECKS = 50;
 
 /** A bottle row ready to insert or update, from a freshly read bottle page. */
 export type FreshBottle = Pick<
@@ -186,7 +191,22 @@ export class SmwsBottleSyncService implements OnModuleInit {
           consecutiveMisses: true,
         },
       });
-      const plan = planSync(known, listing.urls, listing.complete, this.rules);
+      const listingPlan = planSync(
+        known,
+        listing.urls,
+        listing.complete,
+        this.rules,
+      );
+      // Before a miss counts, ask the bottle's own page whether it is still in stock.
+      const plan = applyStockChecks(
+        listingPlan,
+        await this.checkStock(
+          session,
+          stockCheckCandidates(listingPlan),
+          new Map(known.map((b) => [b.code, b.url])),
+        ),
+      );
+      run.confirmed = plan.confirmed.length;
       const { pages: read, failed } = await this.readBottlePages(
         session,
         plan.unknownUrls.filter((url) => !this.notBottles.has(url)),
@@ -223,6 +243,35 @@ export class SmwsBottleSyncService implements OnModuleInit {
       `Scrape #${run.id} ${run.status}: listed ${run.listed ?? '-'}, added ${run.added ?? 0}, relisted ${run.relisted ?? 0}, missed ${run.missed ?? 0}, delisted ${run.delisted ?? 0}${run.note ? ` — ${run.note}` : ''}${run.error ? ` — ${run.error}` : ''}`,
     );
     return run;
+  }
+
+  /** Page check for each candidate; any error counts as unknown (`null`). */
+  private async checkStock(
+    session: SmwsSiteSession,
+    codes: string[],
+    urlByCode: Map<string, string>,
+  ): Promise<Map<string, StockCheck>> {
+    const checks = new Map<string, StockCheck>();
+    for (const code of codes.slice(0, MAX_STOCK_CHECKS)) {
+      const url = urlByCode.get(code);
+      if (!url) continue;
+      try {
+        checks.set(code, await session.checkStock(url));
+      } catch (error) {
+        checks.set(code, null);
+        this.logger.warn(
+          `Stock check ${code} (${url}): ${errorMessage(error)}`,
+        );
+      }
+    }
+    if (codes.length) {
+      const count = (v: StockCheck) =>
+        [...checks.values()].filter((c) => c === v).length;
+      this.logger.log(
+        `Stock checks for ${codes.length} missing bottle(s): ${count(true)} in stock, ${count(false)} out of stock, ${count(null)} unknown${codes.length > MAX_STOCK_CHECKS ? ` (only the first ${MAX_STOCK_CHECKS} checked)` : ''}.`,
+      );
+    }
+    return checks;
   }
 
   private async readBottlePages(

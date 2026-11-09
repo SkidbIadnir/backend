@@ -1,4 +1,9 @@
-import { KnownBottle, planSync } from './smws-bottle-sync.rules';
+import {
+  applyStockChecks,
+  KnownBottle,
+  planSync,
+  stockCheckCandidates,
+} from './smws-bottle-sync.rules';
 
 const url = (code: string) => `https://smws.eu/${code}`;
 const bottle = (
@@ -100,5 +105,50 @@ describe('planSync', () => {
       minListedRatio: 0.5,
     });
     expect(plan.delisted).toEqual(['a']);
+  });
+});
+
+describe('applyStockChecks', () => {
+  // b0 and b1 miss for the first time, `gone` reaches the threshold.
+  const plan = planSync(
+    [bottle('gone', { consecutiveMisses: 1 }), ...many(20)],
+    many(20)
+      .slice(2)
+      .map((b) => b.url),
+    true,
+  );
+
+  it('starts from a trusted plan', () => {
+    expect(plan.trusted).toBe(true);
+  });
+
+  it('checks every missed and delisted bottle', () => {
+    expect(stockCheckCandidates(plan).sort()).toEqual(['b0', 'b1', 'gone']);
+  });
+
+  it('turns in-stock bottles into seen, out-of-stock ones into delisted, and leaves unknown ones to the miss rule', () => {
+    const next = applyStockChecks(
+      plan,
+      new Map([
+        ['b0', true],
+        ['b1', false],
+        ['gone', null],
+      ]),
+    );
+    expect(next.confirmed).toEqual(['b0']);
+    expect(next.seen).toContain('b0');
+    expect(next.missed).toEqual([]);
+    expect(next.delisted.sort()).toEqual(['b1', 'gone']);
+  });
+
+  it('keeps a delist-candidate available when its page says in stock', () => {
+    const next = applyStockChecks(plan, new Map([['gone', true]]));
+    expect(next.delisted).toEqual([]);
+    expect(next.confirmed).toEqual(['gone']);
+    expect(next.missed.map((m) => m.code)).toEqual(['b0', 'b1']);
+  });
+
+  it('changes nothing without checks', () => {
+    expect(applyStockChecks(plan, new Map())).toEqual(plan);
   });
 });

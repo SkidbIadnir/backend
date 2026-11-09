@@ -1,3 +1,4 @@
+import { In } from 'typeorm';
 import { createMockRepository } from '../../test-utils/mock-repository.factory';
 import { TasteepSmwsBottle } from '../entities/tasteep-smws-bottle.entity';
 import { SmwsBottleSyncService } from './smws-bottle-sync.service';
@@ -32,6 +33,7 @@ describe('SmwsBottleSyncService', () => {
   let session: {
     listProducts: jest.Mock;
     readBottle: jest.Mock;
+    checkStock: jest.Mock;
     close: jest.Mock;
   };
   let site: { open: jest.Mock };
@@ -70,6 +72,7 @@ describe('SmwsBottleSyncService', () => {
         .fn()
         .mockResolvedValue({ urls: [], pages: 1, complete: true }),
       readBottle: jest.fn(),
+      checkStock: jest.fn().mockResolvedValue(null),
       close: jest.fn().mockResolvedValue(undefined),
     };
     site = { open: jest.fn().mockResolvedValue(session) };
@@ -214,6 +217,69 @@ describe('SmwsBottleSyncService', () => {
     expect(session.readBottle).toHaveBeenCalledWith(url('broken'));
   });
 
+  describe('stock checks on bottles missing from a trusted listing', () => {
+    const known = (misses: number) => [
+      {
+        code: '1.1',
+        url: url('gone'),
+        delistedAt: null,
+        consecutiveMisses: misses,
+      },
+      ...['b', 'c', 'd', 'e'].map((s, i) => ({
+        code: `2.${i}`,
+        url: url(s),
+        delistedAt: null,
+        consecutiveMisses: 0,
+      })),
+    ];
+    beforeEach(() => {
+      session.listProducts.mockResolvedValue({
+        urls: ['b', 'c', 'd', 'e'].map(url),
+        pages: 1,
+        complete: true,
+      });
+    });
+
+    it('counts no miss when the page says in stock', async () => {
+      bottles.find!.mockResolvedValue(known(1));
+      session.checkStock.mockResolvedValue(true);
+      const run = await service.run('cron');
+      expect(session.checkStock).toHaveBeenCalledWith(url('gone'));
+      expect(run).toEqual(
+        expect.objectContaining({ confirmed: 1, missed: 0, delisted: 0 }),
+      );
+      expect(manager.update).toHaveBeenCalledWith(
+        TasteepSmwsBottle,
+        { code: In(['2.0', '2.1', '2.2', '2.3', '1.1']) },
+        expect.objectContaining({ consecutiveMisses: 0, delistedAt: null }),
+      );
+    });
+
+    it('delists at once when the page says out of stock', async () => {
+      bottles.find!.mockResolvedValue(known(0));
+      session.checkStock.mockResolvedValue(false);
+      const run = await service.run('cron');
+      expect(run).toEqual(
+        expect.objectContaining({ confirmed: 0, missed: 0, delisted: 1 }),
+      );
+    });
+
+    it('falls back to the miss rule when the page cannot be read', async () => {
+      bottles.find!.mockResolvedValue(known(0));
+      session.checkStock.mockRejectedValue(new Error('timeout'));
+      const run = await service.run('cron');
+      expect(run).toEqual(
+        expect.objectContaining({ confirmed: 0, missed: 1, delisted: 0 }),
+      );
+    });
+
+    it('does not check pages when nothing is missing', async () => {
+      bottles.find!.mockResolvedValue(known(0).slice(1));
+      await service.run('cron');
+      expect(session.checkStock).not.toHaveBeenCalled();
+    });
+  });
+
   it('marks leftover running rows as failed at boot when no one holds the lock', async () => {
     await service.onModuleInit();
     expect(runs.update).toHaveBeenCalledWith(
@@ -258,6 +324,7 @@ describe('SmwsBottleSyncService', () => {
           missed: [],
           delisted: ['1.1'],
           unknownUrls: [url('moved')],
+          confirmed: [],
         },
         fresh,
         new Date(),

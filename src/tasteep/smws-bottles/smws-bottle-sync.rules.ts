@@ -9,7 +9,10 @@
  *  - a bottle the listing shows is always marked seen (positive evidence is
  *    safe to apply even from an untrusted run);
  *  - an available bottle missing from a trusted run gets a miss, and is
- *    delisted only after `missesBeforeDelist` trusted misses in a row.
+ *    delisted only after `missesBeforeDelist` trusted misses in a row;
+ *  - before that, its own page is checked (`applyStockChecks`): in stock
+ *    means the listing skipped it (no miss), out of stock means it is gone
+ *    (delisted at once), unreadable leaves the miss rule to decide.
  */
 
 export interface SyncRules {
@@ -45,6 +48,8 @@ export interface SyncPlan {
   delisted: string[];
   /** Listed URLs no known bottle has: their detail pages need scraping. */
   unknownUrls: string[];
+  /** Of `seen`, the bottles missing from the listing but confirmed in stock on their own page. */
+  confirmed: string[];
 }
 
 export function planSync(
@@ -93,5 +98,38 @@ export function planSync(
     missed,
     delisted,
     unknownUrls: [...listed].filter((url) => !knownUrls.has(url)),
+    confirmed: [],
+  };
+}
+
+/** Bottles whose page should be checked before a miss counts: every miss and delist of a trusted run. */
+export function stockCheckCandidates(plan: SyncPlan): string[] {
+  return [...plan.missed.map((m) => m.code), ...plan.delisted];
+}
+
+/** `true` in stock, `false` out of stock, `null` page unreadable or without stock data. */
+export type StockCheck = boolean | null;
+
+/**
+ * Folds the page checks into the plan. Missing from `checks` is the same as
+ * `null`: the miss rule decides, as before.
+ */
+export function applyStockChecks(
+  plan: SyncPlan,
+  checks: Map<string, StockCheck>,
+): SyncPlan {
+  const state = (code: string) => checks.get(code) ?? null;
+  const confirmed = stockCheckCandidates(plan).filter(
+    (code) => state(code) === true,
+  );
+  return {
+    ...plan,
+    seen: [...plan.seen, ...confirmed],
+    confirmed: [...plan.confirmed, ...confirmed],
+    missed: plan.missed.filter((m) => state(m.code) === null),
+    delisted: [
+      ...plan.delisted.filter((code) => state(code) !== true),
+      ...plan.missed.filter((m) => state(m.code) === false).map((m) => m.code),
+    ],
   };
 }
