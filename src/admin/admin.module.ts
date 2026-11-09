@@ -1,13 +1,9 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ThrottlerModule } from '@nestjs/throttler';
-import { SmwsArchive } from '../smws/entities/smws-archive.entity';
-import { SmwsDistillery } from '../smws/entities/smws-distillery.entity';
-import { SmwsLive } from '../smws/entities/smws-live.entity';
-import { SmwsLookout } from '../smws/entities/smws-lookout.entity';
-import { ScraperModule } from '../smws/scraper/scraper.module';
 import { TasteepAuthModule } from '../tasteep/auth/tasteep-auth.module';
 import { SmwsCodesModule } from '../tasteep/smws-codes/smws-codes.module';
+import { SmwsBottlesModule } from '../tasteep/smws-bottles/smws-bottles.module';
 import { GeocodeModule } from '../tasteep/geocode/geocode.module';
 import { RegionsModule } from '../tasteep/regions/regions.module';
 import { TasteepEmailOtp } from '../tasteep/entities/tasteep-email-otp.entity';
@@ -40,10 +36,6 @@ import { ADMIN_LOG_BUFFER, logBuffer } from './logging/log-buffer';
       TasteepTasting,
       TasteepEmailOtp,
       TasteepGeocodeCache,
-      SmwsLive,
-      SmwsArchive,
-      SmwsDistillery,
-      SmwsLookout,
     ]),
     // Scoped to this module: only the admin controllers use ThrottlerGuard.
     ThrottlerModule.forRoot([
@@ -53,7 +45,7 @@ import { ADMIN_LOG_BUFFER, logBuffer } from './logging/log-buffer';
     SmwsCodesModule,
     GeocodeModule,
     RegionsModule,
-    ScraperModule,
+    SmwsBottlesModule,
   ],
   controllers: [
     AdminStatsController,

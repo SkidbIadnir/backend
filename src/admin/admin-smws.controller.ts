@@ -27,19 +27,11 @@ export class AdminSmwsController {
     return this.smws.status();
   }
 
-  @Post('scraper/run-live')
+  @Post('scraper/run')
   @HttpCode(HttpStatus.ACCEPTED)
-  runLive(@Req() req: AdminAuthRequest): ScraperStartedJson {
-    this.smws.start('live');
-    this.audit.record(req.admin.email, 'run-scraper', 'live');
-    return { started: true };
-  }
-
-  @Post('scraper/run-archive')
-  @HttpCode(HttpStatus.ACCEPTED)
-  runArchive(@Req() req: AdminAuthRequest): ScraperStartedJson {
-    this.smws.start('archive');
-    this.audit.record(req.admin.email, 'run-scraper', 'archive');
+  run(@Req() req: AdminAuthRequest): ScraperStartedJson {
+    this.smws.start();
+    this.audit.record(req.admin.email, 'run-scraper', 'smws');
     return { started: true };
   }
 }

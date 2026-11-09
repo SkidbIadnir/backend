@@ -4,16 +4,13 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AdminModule } from './admin/admin.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { SmwsModule } from './smws/smws.module';
 import { TasteepModule } from './tasteep/tasteep.module';
 
 /**
- * Root module. Two fully independent projects share this process and this
- * Postgres database, but nothing else:
+ * Root module:
  *
- *  - `SmwsModule`     → `src/smws/`     tables `smws_*`                   routes `/smws/*`
- *  - `TasteepModule`  → `src/tasteep/`  tables `tasteep_*`                routes `/auth/*`, `/tasteep/*`
- *  - `AdminModule`    → `src/admin/`    reads both projects' tables       routes `/admin/*` (dashboard API)
+ *  - `TasteepModule`  → `src/tasteep/`  tables `tasteep_*`   routes `/auth/*`, `/tasteep/*`
+ *  - `AdminModule`    → `src/admin/`    Tasteep's dashboard  routes `/admin/*`
  *
  * Entities are registered by each feature module (`autoLoadEntities`), so there
  * is no central entity list to keep in sync.
@@ -38,7 +35,6 @@ import { TasteepModule } from './tasteep/tasteep.module';
       logging: !['production', 'test'].includes(process.env.NODE_ENV ?? ''),
     }),
     ScheduleModule.forRoot(),
-    SmwsModule,
     TasteepModule,
     AdminModule,
   ],

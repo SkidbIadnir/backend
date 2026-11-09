@@ -200,6 +200,49 @@ subregions (empty list when the country is the only sensible choice).
 
 ---
 
+## SMWS bottles
+
+Bottlings seen on smws.eu, scraped nightly. Shared reference data: every signed-in user
+gets the same list. A bottle that leaves the shop is never deleted, only flagged
+(`available: false`, `delisted_at` set), so the delisted ones are the archive.
+
+`GET /tasteep/smws-bottles` → `{"total": 312, "items": [SmwsBottle, …]}`
+
+| Query | Default | Meaning |
+|---|---|---|
+| `status` | `available` | `available`, `delisted` or `all` |
+| `distillery_code` | | code prefix, e.g. `1`, `G1` (case-insensitive) |
+| `region_id` | | id from `GET /tasteep/regions`; a country also matches its subregions |
+| `limit` / `offset` | `50` / `0` | `limit` ≤ 200 |
+
+Available bottles come newest first (`first_seen_at`), delisted ones most recently delisted
+first. `GET /tasteep/smws-bottles/:code` (e.g. `/tasteep/smws-bottles/1.234`) → one
+`SmwsBottle`, `404` if unknown.
+
+```json
+{
+  "code": "1.234", "distillery_code": "1", "cask_no": "234",
+  "name": "A dram for Ishtar", "url": "https://smws.eu/1-234-a-dram-for-ishtar",
+  "distillery_name": "Glenfarclas", "category": "single malt",
+  "region_text": "Speyside", "region_id": "scotland/speyside",
+  "price_text": "€95.00", "price_amount": 95, "price_currency": "EUR",
+  "abv": 58.3, "age": "12 years", "cask_type": "Ex-bourbon hogshead",
+  "profile": "Juicy, oak & vanilla",
+  "available": true,
+  "first_seen_at": "2026-11-01T00:04:12.000Z",
+  "last_seen_at": "2026-11-09T00:03:55.000Z",
+  "delisted_at": null
+}
+```
+
+- `distillery_code` is the key of `GET /tasteep/smws-codes`; `distillery_name`/`category`
+  are `null` when SMWS lists a code the reference list does not have yet.
+- `region_id` is the bottle's own region text resolved against the curated regions,
+  falling back to the distillery code's region; `null` when neither matches.
+- Every field after `name` and `url` may be `null`.
+
+---
+
 ## Geocoding
 
 `POST /tasteep/geocode` `{"query": "Lagavulin distillery"}`
