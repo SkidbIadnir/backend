@@ -253,6 +253,3 @@ on every push to `master`.
 - `?unplaced=true` on the list endpoint was chosen over a separate `/unplaced` route.
 - Settings columns (`theme_mode`, `score_scale`, `unit_system`, `currency`) exist on
   `tasteep_users` but have no endpoint yet.
-- SMWS lost its Discord login, alerts and push notifications on purpose: it only feeds a
-  website now. The old `users`, `user_alerts`, `smws_users` and `tastings` tables are not
-  migrated; drop them manually if they still exist in a database created by earlier versions.
