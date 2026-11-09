@@ -1,6 +1,6 @@
 /**
  * Environment access for the Tasteep project. All variables are namespaced
- * `TASTEEP_*` so nothing is shared with the SMWS project (see `.env.example`).
+ * `TASTEEP_*` (see `.env.example`).
  */
 export const tasteepConfig = {
   get jwtSecret(): string {
@@ -71,7 +71,13 @@ export const tasteepConfig = {
   get nominatimUserAgent(): string | undefined {
     return process.env.TASTEEP_NOMINATIM_USER_AGENT || undefined;
   },
+
+  // --- SMWS bottles scraper ----------------------------------------------------
+  /** Nightly scrape of smws.eu. Manual runs from `/admin/smws` work either way. */
+  get smwsScraperEnabled(): boolean {
+    return process.env.TASTEEP_SMWS_SCRAPER_ENABLED !== 'false';
+  },
 };
 
-/** JWT `aud` claim. Keeps Tasteep tokens from ever validating against the SMWS guard, and vice versa. */
+/** JWT `aud` claim, so a token minted for another app on the same secret is rejected. */
 export const TASTEEP_JWT_AUDIENCE = 'tasteep';
