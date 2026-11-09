@@ -130,29 +130,43 @@ export class OtpStatsJson {
 export class SmwsBottleCounts {
   total: number;
   available: number;
-  /** Our archive: bottles no longer listed on smws.eu. */
+  /** Sold out: our archive. */
   delisted: number;
+  single_casks: number;
+  blends: number;
   without_region: number;
-  /** Code prefix missing from `tasteep_smws_codes`. */
+  /** Single casks whose code prefix is missing from `tasteep_smws_codes`. */
   unknown_distillery: number;
   last_seen_at: string | null;
+}
+export class SmwsPageCounts {
+  /** Sitemap URLs that are bottles. */
+  bottle: number;
+  /** Product pages without an ABV (gift cards, glassware, packs). */
+  other: number;
+  /** Pages that answered 404. */
+  gone: number;
 }
 export class SmwsScrapeRunJson {
   id: number;
   /** `cron` or `admin`. */
   trigger: string;
-  /** `running`, `succeeded`, `partial` (listing not trusted, nothing delisted) or `failed`. */
+  /** `running`, `succeeded`, `partial` (sitemap or some page reads failed) or `failed`. */
   status: string;
   started_at: string;
   finished_at: string | null;
-  pages: number | null;
-  listed: number | null;
+  /** Product URLs in the sitemap. */
+  sitemap_urls: number | null;
+  /** Never-seen URLs read this run. */
+  discovered: number | null;
+  /** Bottles saved for the first time. */
   added: number | null;
+  /** Known bottles re-read for stock and price. */
+  checked: number | null;
   relisted: number | null;
-  missed: number | null;
-  /** Missing from the listing but confirmed in stock on their page. */
-  confirmed: number | null;
   delisted: number | null;
+  /** Page reads that failed; retried next run. */
+  failed: number | null;
   note: string | null;
   error: string | null;
 }
@@ -164,6 +178,7 @@ export class SmwsScraperStatus {
 }
 export class SmwsStatusJson {
   bottles: SmwsBottleCounts;
+  pages: SmwsPageCounts;
   scraper: SmwsScraperStatus;
 }
 

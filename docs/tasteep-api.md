@@ -202,45 +202,55 @@ subregions (empty list when the country is the only sensible choice).
 
 ## SMWS bottles
 
-Bottlings seen on smws.eu, scraped nightly. Shared reference data: every signed-in user
-gets the same list. A bottle that leaves the shop is never deleted, only flagged
-(`available: false`, `delisted_at` set), so the delisted ones are the archive.
+SMWS bottles sold on smws.eu, single casks and blends, refreshed nightly. Shared reference
+data: every signed-in user gets the same list. A bottle that sells out is never deleted, only
+flagged (`available: false`), so the sold-out ones are the archive.
 
 `GET /tasteep/smws-bottles` → `{"total": 312, "items": [SmwsBottle, …]}`
 
 | Query | Default | Meaning |
 |---|---|---|
-| `status` | `available` | `available`, `delisted` or `all` |
+| `status` | `available` | `available`, `delisted` (sold out) or `all` |
+| `kind` | | `single_cask` or `blend` |
 | `distillery_code` | | code prefix, e.g. `1`, `G1` (case-insensitive) |
 | `region_id` | | id from `GET /tasteep/regions`; a country also matches its subregions |
 | `limit` / `offset` | `50` / `0` | `limit` ≤ 200 |
 
-Available bottles come newest first (`first_seen_at`), delisted ones most recently delisted
-first. `GET /tasteep/smws-bottles/:code` (e.g. `/tasteep/smws-bottles/1.234`) → one
-`SmwsBottle`, `404` if unknown.
+Newest release first (`released_at`); with `status=delisted`, most recently sold out first.
+`GET /tasteep/smws-bottles/:id` → one `SmwsBottle`, where `:id` is a cask code
+(`/tasteep/smws-bottles/1.309`) or a SKU; `404` if unknown.
 
 ```json
 {
-  "code": "1.234", "distillery_code": "1", "cask_no": "234",
-  "name": "A dram for Ishtar", "url": "https://smws.eu/1-234-a-dram-for-ishtar",
+  "sku": "001309GX0700614", "kind": "single_cask",
+  "code": "1.309", "distillery_code": "1", "cask_no": "309", "batch": null,
+  "name": "Barrelbutt", "url": "https://smws.eu/barrelbutt",
   "distillery_name": "Glenfarclas", "category": "single malt",
   "region_text": "Speyside", "region_id": "scotland/speyside",
-  "price_text": "€95.00", "price_amount": 95, "price_currency": "EUR",
-  "abv": 58.3, "age": "12 years", "cask_type": "1st fill ex-oloroso butt",
+  "price_text": "€140.00", "price_amount": 140, "price_currency": "EUR",
+  "abv": 56.3, "age": "14 years", "cask_type": "1st fill ex-oloroso butt",
   "distilled_date": "2012-01-25",
-  "profile": "Juicy, oak & vanilla",
-  "available": true,
-  "first_seen_at": "2026-11-01T00:04:12.000Z",
-  "last_seen_at": "2026-11-09T00:03:55.000Z",
+  "profile": "Dried Fruits & Spices",
+  "released_at": "2026-11-06T09:00:00.000Z",
+  "available": true, "stock": 45,
+  "first_seen_at": "2026-11-09T00:04:12.000Z",
+  "last_seen_at": "2026-11-10T00:03:55.000Z",
   "delisted_at": null
 }
 ```
 
+A blend has `kind: "blend"`, `code`/`distillery_code`/`cask_no`/`distillery_name` `null` and
+`batch` set, e.g. `"batch": "Batch 40"` for Fruit Bomb.
+
+- `sku` is the stable id. `code` is unique when set.
 - `distillery_code` is the key of `GET /tasteep/smws-codes`; `distillery_name`/`category`
-  are `null` when SMWS lists a code the reference list does not have yet.
-- `region_id` is the bottle's own region text resolved against the curated regions,
-  falling back to the distillery code's region; `null` when neither matches.
-- `distilled_date` is `YYYY-MM-DD`.
+  are `null` for blends and for codes the reference list does not have yet.
+- `region_id` is the bottle's region text resolved against the curated regions, falling back
+  to the distillery code's region; `null` when neither matches.
+- `distilled_date` is `YYYY-MM-DD`; `released_at` is the shop's release date.
+- `stock` is the number of bottles left at the last check, when the shop shows it.
+- `delisted_at` is when we saw the bottle sell out; `null` for bottles already sold out when
+  first seen (most of the archive).
 - Every field after `name` and `url` may be `null`.
 
 ---

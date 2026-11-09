@@ -37,10 +37,11 @@ src/
 │   ├── geocode/             /tasteep/geocode — cache-first Nominatim with a 1 req/s limiter
 │   ├── regions/             /tasteep/regions — curated country/subregion picker, seeded from data/region.json
 │   ├── smws-codes/          /tasteep/smws-codes — SMWS code → distillery list, seeded from data/smws-codes.json
-│   ├── smws-bottles/        /tasteep/smws-bottles — bottles scraped from smws.eu (see below)
-│   │   ├── smws-site.scraper.ts         Playwright: listing pages + bottle page, no DB access
-│   │   ├── smws-bottle-sync.rules.ts    pure availability rules (planSync)
-│   │   ├── smws-bottle-sync.service.ts  one run: lock, list, plan, read new pages, apply in a transaction
+│   ├── smws-bottles/        /tasteep/smws-bottles — bottles read from smws.eu (see below)
+│   │   ├── smws-http.client.ts          plain HTTP to smws.eu: sitemap + product pages, 3 s apart
+│   │   ├── smws-product.parser.ts       pure: product page HTML → raw fields (cheerio)
+│   │   ├── smws-catalog.rules.ts        pure: raw fields → bottle, merge that never loses a value
+│   │   ├── smws-bottle-sync.service.ts  one run: lock, discover, stock check, relist sweep
 │   │   ├── smws-bottles.service.ts      reads for the app and the admin status
 │   │   └── smws-scrape.scheduler.ts     nightly cron
 │   ├── wishlist/            /tasteep/wishlist — folders and items
@@ -119,25 +120,32 @@ Request/response details, status codes and the location-precision rules are in
 
 ### SMWS bottles
 
-A Playwright scraper reads the smws.eu listing every night at midnight
-(`TASTEEP_SMWS_SCRAPER_ENABLED=false` turns the cron off) and keeps `tasteep_smws_bottles`
-up to date. Each bottle links to its distillery through `tasteep_smws_codes` and to a curated
-region or subregion. Bottles are never deleted: one that leaves the shop gets `delisted_at`,
-and the delisted rows are our archive. The smws.eu archive pages are not scraped.
+Every night at midnight (`TASTEEP_SMWS_SCRAPER_ENABLED=false` turns the cron off) the scraper
+reads smws.eu over **plain HTTP, no browser**, one request every 3 s
+(`TASTEEP_SMWS_REQUEST_INTERVAL_MS`), and keeps `tasteep_smws_catalog` up to date. It only
+uses public pages: the product sitemap (`/xmlsitemap.php`) and the product pages.
 
-Availability rules (`smws-bottle-sync.rules.ts`):
+1. **Discovery:** every sitemap URL never read before is read once and recorded in
+   `tasteep_smws_pages` (`bottle`, `other` for products without an ABV, `gone` for 404). The
+   first run reads the whole sitemap (~2,500 pages, about 2 hours); it saves page by page, so
+   an interrupted run resumes where it stopped.
+2. **Stock check:** every in-stock bottle's page is re-read. **Availability is the page's own
+   stock flag** (`BCData.product_attributes.instock`): out of stock (or a 404) sets
+   `in_stock = false` and `delisted_at`; back in stock clears them.
+3. **Relist sweep:** bottles sold out in the last 30 days are re-read weekly.
+4. Pages read as `other` are re-read monthly.
 
-- A bottle is identified by its SMWS code; the listing is matched on the normalized product URL.
-- A run is **trusted** only if the listing completed and lists at least 80% of the bottles
-  currently available. Untrusted runs (`partial`) still record seen and new bottles but never
-  delist anything.
-- An available bottle missing from a trusted run is first checked on its own page (the shop's
-  `instock` flag): **in stock** means the listing skipped it, so no miss is counted (`confirmed`
-  in the run log); **out of stock** delists it at once; an unreadable page falls back to the miss
-  rule: delisted after **2 trusted misses in a row**. A delisted bottle that shows up again is
-  relisted.
-- One run at a time across processes (Postgres advisory lock); all writes of a run happen in one
-  transaction; every run is logged in `tasteep_smws_scrape_runs` (shown by `GET /admin/smws/status`).
+Bottles are keyed by the shop's **SKU**, so blends without a cask code (`kind = blend`, e.g.
+Fruit Bomb, `batch = "Batch 40"`) are stored next to single casks (`kind = single_cask`,
+`code = 1.309`). Each field is read from the visible info list first (same format as before),
+then from the shop's `custom_fields`; profile comes from the product's categories, price and
+stock from the shop's JSON. A read that lacks a field never erases a stored value, and
+categories accumulate. Bottles are never deleted: sold-out rows are our archive. Each single
+cask links to its distillery through `tasteep_smws_codes` and to a curated region or subregion.
+
+One run at a time across processes (Postgres advisory lock); a failed read changes nothing and
+is retried next run; every run is logged in `tasteep_smws_scrape_runs` (shown by
+`GET /admin/smws/status`).
 
 `GET /tasteep/smws-bottles` serves the list to the app (see `docs/tasteep-api.md`);
 `POST /admin/smws/scraper/run` starts a run by hand.
@@ -171,6 +179,8 @@ yourself or run once with synchronize before switching the flag.
 | `TASTEEP_NOMINATIM_USER_AGENT` | Tasteep | for geocoding | e.g. `Tasteep/1.0 (you@example.com)` |
 | `TASTEEP_NOMINATIM_URL` | Tasteep | no | default public Nominatim |
 | `TASTEEP_SMWS_SCRAPER_ENABLED` | Tasteep | no | default `true`; `false` → no nightly scrape |
+| `TASTEEP_SMWS_REQUEST_INTERVAL_MS` | Tasteep | no | default `3000`; gap between requests to smws.eu |
+| `TASTEEP_SMWS_USER_AGENT` | Tasteep | no | User-Agent sent to smws.eu |
 
 ## Postman
 
