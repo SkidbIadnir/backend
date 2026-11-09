@@ -226,7 +226,8 @@ first. `GET /tasteep/smws-bottles/:code` (e.g. `/tasteep/smws-bottles/1.234`) â†
   "distillery_name": "Glenfarclas", "category": "single malt",
   "region_text": "Speyside", "region_id": "scotland/speyside",
   "price_text": "â‚¬95.00", "price_amount": 95, "price_currency": "EUR",
-  "abv": 58.3, "age": "12 years", "cask_type": "Ex-bourbon hogshead",
+  "abv": 58.3, "age": "12 years", "cask_type": "1st fill ex-oloroso butt",
+  "distilled_date": "2012-01-25",
   "profile": "Juicy, oak & vanilla",
   "available": true,
   "first_seen_at": "2026-11-01T00:04:12.000Z",
@@ -239,6 +240,7 @@ first. `GET /tasteep/smws-bottles/:code` (e.g. `/tasteep/smws-bottles/1.234`) â†
   are `null` when SMWS lists a code the reference list does not have yet.
 - `region_id` is the bottle's own region text resolved against the curated regions,
   falling back to the distillery code's region; `null` when neither matches.
+- `distilled_date` is `YYYY-MM-DD`.
 - Every field after `name` and `url` may be `null`.
 
 ---

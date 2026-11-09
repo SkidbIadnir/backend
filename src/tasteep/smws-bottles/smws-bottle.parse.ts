@@ -83,6 +83,24 @@ export function parseAbv(text: string | null | undefined): number | null {
   return value !== null && value > 0 && value <= 100 ? value : null;
 }
 
+/** `25/01/2012` → `2012-01-25`; `null` when not a valid `dd/mm/yyyy` date. */
+export function parseDistilledDate(
+  text: string | null | undefined,
+): string | null {
+  const m = text?.trim().match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/);
+  if (!m) return null;
+  const [day, month, year] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return date.toISOString().slice(0, 10);
+}
+
 /** Trimmed text, or `null` when empty. */
 export const textOrNull = (v: string | null | undefined): string | null =>
   v?.trim() ? v.trim() : null;
