@@ -213,7 +213,8 @@ deletes everything it made afterwards, so it is safe to run against a dev databa
 `postman/Backend.postman_collection.json` + `postman/local.postman_environment.json`. The
 *Tasteep — Tastings → Atlas (phase 2) → Cleanup* folders are an ordered, fully asserted
 scenario (two tastings created, geocoded, pinned, aggregated, deleted). Run it headless against
-a running server with a token from the email login:
+a running server with a token from the email login. newman isn't a dev dependency (its
+dependency tree carries unfixable audit findings); the script fetches it on demand with `npx`:
 
 ```bash
 npm run start:dev                                  # in another shell; OTP is printed in its log
