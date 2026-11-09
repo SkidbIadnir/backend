@@ -11,7 +11,7 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { In, Repository } from 'typeorm';
 import { AppModule } from '../src/app.module';
-import { ScraperService } from '../src/smws/scraper/scraper.service';
+import { SmwsBottleSyncService } from '../src/tasteep/smws-bottles/smws-bottle-sync.service';
 import { TasteepGeocodeCache } from '../src/tasteep/entities/tasteep-geocode-cache.entity';
 import { TasteepSession } from '../src/tasteep/entities/tasteep-session.entity';
 import { TasteepTasting } from '../src/tasteep/entities/tasteep-tasting.entity';
@@ -37,15 +37,15 @@ describe('Admin API (e2e)', () => {
   let geocode: Repository<TasteepGeocodeCache>;
   let admin: { id: string; sid: string; token: string };
   let member: { id: string; sid: string; token: string };
-  let liveRunning = false;
-  let finishLive: () => void;
-  const runScraper = jest.fn(
+  let scraping = false;
+  let finishScrape: () => void;
+  const runScrape = jest.fn(
     () =>
-      new Promise<void>((resolve) => {
-        liveRunning = true;
-        finishLive = () => {
-          liveRunning = false;
-          resolve();
+      new Promise<null>((resolve) => {
+        scraping = true;
+        finishScrape = () => {
+          scraping = false;
+          resolve(null);
         };
       }),
   );
@@ -83,25 +83,8 @@ describe('Admin API (e2e)', () => {
   beforeAll(async () => {
     process.env.ADMIN_EMAILS = ADMIN_EMAIL;
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
-      .overrideProvider(ScraperService)
-      .useValue({
-        runScraper,
-        runArchiveScraper: jest.fn().mockResolvedValue(undefined),
-        getRunState: () => ({
-          live: {
-            running: liveRunning,
-            lastStartedAt: null,
-            lastFinishedAt: null,
-            lastError: null,
-          },
-          archive: {
-            running: false,
-            lastStartedAt: null,
-            lastFinishedAt: null,
-            lastError: null,
-          },
-        }),
-      })
+      .overrideProvider(SmwsBottleSyncService)
+      .useValue({ run: runScrape, isRunning: () => scraping })
       .compile();
     app = moduleRef.createNestApplication();
     app.useGlobalPipes(new ValidationPipe({ whitelist: true })); // same as main.ts
@@ -375,27 +358,32 @@ describe('Admin API (e2e)', () => {
         .get('/admin/smws/status')
         .set(auth(admin))
         .expect(200);
-      expect(res.body.live).toEqual(
-        expect.objectContaining({ total: expect.any(Number) }),
+      expect(res.body.bottles).toEqual(
+        expect.objectContaining({
+          total: expect.any(Number),
+          available: expect.any(Number),
+          delisted: expect.any(Number),
+        }),
       );
-      expect(res.body.scraper.live.running).toBe(false);
+      expect(res.body.scraper.running).toBe(false);
+      expect(Array.isArray(res.body.scraper.recent_runs)).toBe(true);
     });
 
     it('starts a run with 202, then 409s while it is still running', async () => {
       await request(http)
-        .post('/admin/smws/scraper/run-live')
+        .post('/admin/smws/scraper/run')
         .set(auth(admin))
         .expect(202)
         .expect({ started: true });
-      expect(runScraper).toHaveBeenCalledTimes(1);
+      expect(runScrape).toHaveBeenCalledWith('admin');
 
       await request(http)
-        .post('/admin/smws/scraper/run-live')
+        .post('/admin/smws/scraper/run')
         .set(auth(admin))
         .expect(409);
-      expect(runScraper).toHaveBeenCalledTimes(1);
+      expect(runScrape).toHaveBeenCalledTimes(1);
 
-      finishLive();
+      finishScrape();
     });
 
     it('does not let a non-admin start a run', async () => {
@@ -404,7 +392,7 @@ describe('Admin API (e2e)', () => {
         `e2e-outsider-${RUN}@tasteep.test`,
       );
       await request(http)
-        .post('/admin/smws/scraper/run-archive')
+        .post('/admin/smws/scraper/run')
         .set(auth(outsider))
         .expect(403);
       await users.delete({ id: outsider.id });

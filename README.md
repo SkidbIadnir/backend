@@ -1,15 +1,11 @@
-# Backend — Tasteep & SMWS Watchtower
+# Backend — Tasteep
 
-One NestJS process, one PostgreSQL database, **two completely independent projects**:
+One NestJS process, one PostgreSQL database:
 
-| Project | Folder | Tables | Routes | JWT audience |
+| Module | Folder | Tables | Routes | Auth |
 |---|---|---|---|---|
-| **Tasteep** — spirit-tasting journal behind the Flutter app | `src/tasteep/` | `tasteep_*` | `/auth/*`, `/tasteep/*` | `tasteep` |
-| **SMWS Watchtower** — scrapes smws.eu and serves the inventory to a website | `src/smws/` | `smws_*` | `/smws/*` | none (no auth) |
-
-Nothing in `src/tasteep/` imports from `src/smws/` or vice versa. Tasteep owns users, auth
-and JWTs; SMWS has no users at all. The only shared code is the root wiring
-(`app.module.ts`, `main.ts`) and a generic jest helper (`src/test-utils/`).
+| **Tasteep** — spirit-tasting journal behind the Flutter app, including the SMWS bottles scraped from smws.eu | `src/tasteep/` | `tasteep_*` | `/auth/*`, `/tasteep/*` | JWT, audience `tasteep` |
+| **Admin** — dashboard API over Tasteep | `src/admin/` | (Tasteep's) | `/admin/*` | Tasteep JWT + `ADMIN_EMAILS` allowlist |
 
 ## Repository layout
 
@@ -40,16 +36,17 @@ src/
 │   │   └── dto/
 │   ├── geocode/             /tasteep/geocode — cache-first Nominatim with a 1 req/s limiter
 │   ├── regions/             /tasteep/regions — curated country/subregion picker, seeded from data/region.json
+│   ├── smws-codes/          /tasteep/smws-codes — SMWS code → distillery list, seeded from data/smws-codes.json
+│   ├── smws-bottles/        /tasteep/smws-bottles — bottles scraped from smws.eu (see below)
+│   │   ├── smws-site.scraper.ts         Playwright: listing pages + bottle page, no DB access
+│   │   ├── smws-bottle-sync.rules.ts    pure availability rules (planSync)
+│   │   ├── smws-bottle-sync.service.ts  one run: lock, list, plan, read new pages, apply in a transaction
+│   │   ├── smws-bottles.service.ts      reads for the app and the admin status
+│   │   └── smws-scrape.scheduler.ts     nightly cron
+│   ├── wishlist/            /tasteep/wishlist — folders and items
 │   └── test-utils/          Tasteep fixtures
 │
-└── smws/
-    ├── smws.module.ts
-    ├── entities/            smws_live, smws_archive, smws_lookout, smws_distilleries
-    ├── scraper/             Playwright scraper, cron jobs, API-key-guarded manual triggers
-    ├── watchtower/          /smws/watchtower/live and /archive — public read endpoints
-    ├── postgres/            distillery seed / purge helpers
-    ├── data/                distillery reference JSON
-    └── test-utils/          SMWS fixtures
+└── admin/                   /admin/* dashboard API (stats, users, tastings, SMWS, codes, regions, logs)
 
 docs/
 └── tasteep-api.md           full client contract for the Flutter app
@@ -120,21 +117,27 @@ Request/response details, status codes and the location-precision rules are in
   identifying `TASTEEP_NOMINATIM_USER_AGENT`, and every result (including "not found") is
   cached forever. Identical concurrent queries share one upstream request.
 
-## SMWS Watchtower
+### SMWS bottles
 
-A scraper and a public read-only feed, nothing else: no users, no auth, no notifications.
-The Playwright scraper runs on a schedule (live inventory daily at midnight, archive every
-2 days at 01:00) and writes to `smws_live` / `smws_archive`; the website reads them back.
+A Playwright scraper reads the smws.eu listing every night at midnight
+(`TASTEEP_SMWS_SCRAPER_ENABLED=false` turns the cron off) and keeps `tasteep_smws_bottles`
+up to date. Each bottle links to its distillery through `tasteep_smws_codes` and to a curated
+region or subregion. Bottles are never deleted: one that leaves the shop gets `delisted_at`,
+and the delisted rows are our archive. The smws.eu archive pages are not scraped.
 
-| Method | Path | Auth | Purpose |
-|---|---|---|---|
-| `GET` | `/smws/watchtower/live` | none | Bottles currently listed on smws.eu, newest first |
-| `GET` | `/smws/watchtower/archive` | none | Every bottle the archive scraper has seen, newest first |
-| `GET` | `/smws/scraper/run-live` | `x-api-key` | Run the live scraper now |
-| `GET` | `/smws/scraper/run-archive` | `x-api-key` | Run the archive scraper now |
+Availability rules (`smws-bottle-sync.rules.ts`):
 
-The manual triggers require the `x-api-key` header to equal `SMWS_SCRAPER_API_KEY`; when
-that variable is unset they answer `403` and only the cron schedule runs the scraper.
+- A bottle is identified by its SMWS code; the listing is matched on the normalized product URL.
+- A run is **trusted** only if the listing completed and lists at least 80% of the bottles
+  currently available. Untrusted runs (`partial`) still record seen and new bottles but never
+  delist anything.
+- An available bottle missing from a trusted run gets a miss; it is delisted after **2 trusted
+  misses in a row**. A delisted bottle that shows up again is relisted.
+- One run at a time across processes (Postgres advisory lock); all writes of a run happen in one
+  transaction; every run is logged in `tasteep_smws_scrape_runs` (shown by `GET /admin/smws/status`).
+
+`GET /tasteep/smws-bottles` serves the list to the app (see `docs/tasteep-api.md`);
+`POST /admin/smws/scraper/run` starts a run by hand.
 
 ## Setup
 
@@ -152,10 +155,10 @@ yourself or run once with synchronize before switching the flag.
 
 | Variable | Project | Required | Notes |
 |---|---|---|---|
-| `POSTGRES_HOST/PORT/DB/USER/PASSWORD` | both | yes | |
-| `APP_URL` | both | yes | Public base URL, used for OAuth callbacks |
-| `PORT` | both | no | default 3000 |
-| `FRONTEND_URL` | both | no | CORS origins, comma-separated |
+| `POSTGRES_HOST/PORT/DB/USER/PASSWORD` | shared | yes | |
+| `APP_URL` | shared | yes | Public base URL, used for OAuth callbacks |
+| `PORT` | shared | no | default 3000 |
+| `FRONTEND_URL` | shared | no | CORS origins, comma-separated |
 | `TASTEEP_JWT_SECRET` | Tasteep | yes | falls back to `JWT_SECRET` |
 | `TASTEEP_JWT_EXPIRES_IN` | Tasteep | no | default `365d` |
 | `TASTEEP_SMTP_HOST/PORT/SECURE/USER/PASS/FROM` | Tasteep | no | unset → OTP logged to console |
@@ -164,23 +167,21 @@ yourself or run once with synchronize before switching the flag.
 | `TASTEEP_DISCORD_CLIENT_ID/SECRET/REDIRECT_URI` | Tasteep | for Discord login | |
 | `TASTEEP_NOMINATIM_USER_AGENT` | Tasteep | for geocoding | e.g. `Tasteep/1.0 (you@example.com)` |
 | `TASTEEP_NOMINATIM_URL` | Tasteep | no | default public Nominatim |
-| `SMWS_SCRAPER_API_KEY` | SMWS | no | unset → manual scraper triggers disabled |
+| `TASTEEP_SMWS_SCRAPER_ENABLED` | Tasteep | no | default `true`; `false` → no nightly scrape |
 
 ## Postman
 
 A ready-to-import collection lives in `postman/`:
 
 - `Backend.postman_collection.json` — every route in this README, grouped into Tasteep Auth,
-  Tasteep Tastings, Tasteep Aggregates & Geocode, SMWS Watchtower and SMWS Scraper.
+  Tasteep Tastings, Tasteep Aggregates & Geocode, Tasteep SMWS bottles and Admin.
 - `local.postman_environment.json` — `base_url` plus the variables the requests need
-  (`tasteep_email`, `tasteep_otp_code`, `scraper_api_key`, ...).
+  (`tasteep_email`, `tasteep_otp_code`, ...).
 
 Import both in Postman, select the **Backend - Local** environment, then run **Tasteep — Auth
 → Request Email Code**, copy the code from the server log (or your inbox once SMTP is
 configured) into the `tasteep_otp_code` variable, and run **Verify Email Code** — it saves the
 bearer token into the environment automatically, so every other Tasteep request just works.
-SMWS's watchtower requests need no auth; its scraper triggers need `scraper_api_key` set to
-match `SMWS_SCRAPER_API_KEY`.
 
 ## Development
 

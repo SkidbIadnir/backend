@@ -127,39 +127,41 @@ export class OtpStatsJson {
   last_24h: number;
 }
 
-export class ScraperRunJson {
-  running: boolean;
-  last_started_at: string | null;
-  last_finished_at: string | null;
-  last_error: string | null;
-}
-export class SmwsLiveStatus {
+export class SmwsBottleCounts {
   total: number;
   available: number;
-  new: number;
-  updated_at: string | null;
+  /** Our archive: bottles no longer listed on smws.eu. */
+  delisted: number;
+  without_region: number;
+  /** Code prefix missing from `tasteep_smws_codes`. */
+  unknown_distillery: number;
+  last_seen_at: string | null;
 }
-export class SmwsArchiveStatus {
-  total: number;
-  new: number;
-  updated_at: string | null;
-}
-export class SmwsDistilleryStatus {
-  total: number;
-  updated_at: string | null;
-}
-export class SmwsLookoutStatus {
-  total: number;
+export class SmwsScrapeRunJson {
+  id: number;
+  /** `cron` or `admin`. */
+  trigger: string;
+  /** `running`, `succeeded`, `partial` (listing not trusted, nothing delisted) or `failed`. */
+  status: string;
+  started_at: string;
+  finished_at: string | null;
+  pages: number | null;
+  listed: number | null;
+  added: number | null;
+  relisted: number | null;
+  missed: number | null;
+  delisted: number | null;
+  note: string | null;
+  error: string | null;
 }
 export class SmwsScraperStatus {
-  live: ScraperRunJson;
-  archive: ScraperRunJson;
+  /** True while this process is scraping. */
+  running: boolean;
+  /** Latest 10 runs, newest first. */
+  recent_runs: SmwsScrapeRunJson[];
 }
 export class SmwsStatusJson {
-  live: SmwsLiveStatus;
-  archive: SmwsArchiveStatus;
-  distilleries: SmwsDistilleryStatus;
-  lookout: SmwsLookoutStatus;
+  bottles: SmwsBottleCounts;
   scraper: SmwsScraperStatus;
 }
 

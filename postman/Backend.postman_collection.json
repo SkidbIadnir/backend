@@ -1,8 +1,8 @@
 {
   "info": {
     "_postman_id": "b4b6b1a0-1234-4abc-9def-tasteep-smws",
-    "name": "Backend \u2014 Tasteep & SMWS Watchtower",
-    "description": "Two independent projects behind one API.\n\n- **Tasteep** \u2014 spirit-tasting journal for the Flutter app. Routes `/auth/*` and `/tasteep/*`, bearer-token auth.\n- **SMWS Watchtower** \u2014 scraper + public read-only whisky feed for a website. Routes `/smws/*`, no auth on reads, optional `x-api-key` on manual scraper triggers.\n\nSet `base_url` in the environment (defaults to `http://localhost:3000`).\n\n**Getting a token:** run **Tasteep \u2014 Auth \u2192 Request Email Code**, read the 6-digit code from the server log (or your inbox if SMTP is configured), put it in `tasteep_otp_code`, then run **Verify Email Code** \u2014 the token is saved into `tasteep_token` and reused by every other Tasteep request.\n\n**Running the journal as a test suite:** the *Tastings \u2192 Atlas (phase 2) \u2192 Cleanup* folders are ordered and fully asserted. Run them with the Collection Runner, or headless with `TASTEEP_TOKEN=\u2026 npm run test:postman` (newman). Leave *Sign Out* for last \u2014 it revokes the token.",
+    "name": "Backend — Tasteep",
+    "description": "- **Tasteep** — spirit-tasting journal for the Flutter app. Routes `/auth/*` and `/tasteep/*`, bearer-token auth.\n\nSet `base_url` in the environment (defaults to `http://localhost:3000`).\n\n**Getting a token:** run **Tasteep — Auth → Request Email Code**, read the 6-digit code from the server log (or your inbox if SMTP is configured), put it in `tasteep_otp_code`, then run **Verify Email Code** — the token is saved into `tasteep_token` and reused by every other Tasteep request.\n\n**Running the journal as a test suite:** the *Tastings → Atlas (phase 2) → Cleanup* folders are ordered and fully asserted. Run them with the Collection Runner, or headless with `TASTEEP_TOKEN=… npm run test:postman` (newman). Leave *Sign Out* for last — it revokes the token.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -13,7 +13,7 @@
   ],
   "item": [
     {
-      "name": "Tasteep \u2014 Auth",
+      "name": "Tasteep — Auth",
       "item": [
         {
           "name": "Request Email Code",
@@ -149,7 +149,7 @@
                 }
               ]
             },
-            "description": "302 redirect to Discord's consent page. Open this in a browser, not via Send \u2014 Postman won't follow the app-deep-link redirect. Copy the `code` query param Discord appends to `discord_redirect_uri` and paste it into the `discord_code` environment variable."
+            "description": "302 redirect to Discord's consent page. Open this in a browser, not via Send — Postman won't follow the app-deep-link redirect. Copy the `code` query param Discord appends to `discord_redirect_uri` and paste it into the `discord_code` environment variable."
           }
         },
         {
@@ -263,13 +263,13 @@
                 "signout"
               ]
             },
-            "description": "Revokes this session server-side. The saved tasteep_token stops working immediately after this \u2014 re-run the email login requests to get a new one."
+            "description": "Revokes this session server-side. The saved tasteep_token stops working immediately after this — re-run the email login requests to get a new one."
           }
         }
       ]
     },
     {
-      "name": "Tasteep \u2014 Tastings",
+      "name": "Tasteep — Tastings",
       "description": "Phase 1 journal CRUD. Needs `tasteep_token` (run the Auth folder first, or pass it to newman). Creates two tastings (`tasting_id`, `tasting_id_2`) that the Atlas folder builds on and the Cleanup folder deletes.",
       "item": [
         {
@@ -335,7 +335,7 @@
                 "{{tasting_id}}"
               ]
             },
-            "description": "PUT is upsert. `:id` must be a UUID \u2014 the pre-request script generates `tasting_id` if the environment has none. Full replacement: any field you omit is stored as null.",
+            "description": "PUT is upsert. `:id` must be a UUID — the pre-request script generates `tasting_id` if the environment has none. Full replacement: any field you omit is stored as null.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Lagavulin 16\",\n  \"category\": \"whisky\",\n  \"photo_path\": null,\n  \"distillery\": \"Lagavulin\",\n  \"region\": \"Islay\",\n  \"region_id\": null,\n  \"abv\": 43,\n  \"price\": 65.5,\n  \"age_statement\": \"16\",\n  \"cask_type\": \"Ex-bourbon & sherry\",\n  \"date_tasted\": \"2026-03-10T19:00:00.000Z\",\n  \"location\": \"Home\",\n  \"score\": 88,\n  \"appearance\": \"Deep amber\",\n  \"tags\": [\n    \"peat\",\n    \"smoke\"\n  ],\n  \"nose\": \"Bonfire\",\n  \"palate\": \"Iodine\",\n  \"finish\": \"Long\",\n  \"lat\": null,\n  \"lon\": null,\n  \"location_precision\": \"unknown\"\n}",
@@ -491,7 +491,7 @@
                 "{{tasting_id}}"
               ]
             },
-            "description": "Replaces the same row. Fields omitted here (region, abv, price, ...) are cleared to null \u2014 this endpoint is not a PATCH.",
+            "description": "Replaces the same row. Fields omitted here (region, abv, price, ...) are cleared to null — this endpoint is not a PATCH.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Lagavulin 16\",\n  \"distillery\": \"Lagavulin\",\n  \"score\": 91,\n  \"tags\": [\n    \"peat\",\n    \"smoke\",\n    \"revisited\"\n  ]\n}",
@@ -521,7 +521,7 @@
           ]
         },
         {
-          "name": "Upsert Tasting (Invalid \u2014 400 expected)",
+          "name": "Upsert Tasting (Invalid — 400 expected)",
           "request": {
             "method": "PUT",
             "header": [
@@ -580,7 +580,7 @@
       }
     },
     {
-      "name": "Tasteep \u2014 Atlas (phase 2)",
+      "name": "Tasteep — Atlas (phase 2)",
       "description": "The Places backend: geocoding via Nominatim (cache-first, 1 req/s server-wide), the per-tasting location route with its manual-pin protection, the \"NOT PLACED\" shelf, and the stats aggregate. Runs after the Tastings folder; expects `tasting_id` and `tasting_id_2` to exist.",
       "item": [
         {
@@ -604,7 +604,7 @@
                 }
               ]
             },
-            "description": "Only `location_precision` in `unknown`/`country` \u2014 the Atlas \"NOT PLACED\" shelf (`unknown` \u2192 SET LOCATION, `country` \u2192 REFINE). Both tastings created above qualify at this point."
+            "description": "Only `location_precision` in `unknown`/`country` — the Atlas \"NOT PLACED\" shelf (`unknown` → SET LOCATION, `country` → REFINE). Both tastings created above qualify at this point."
           },
           "response": [],
           "event": [
@@ -786,7 +786,7 @@
                 "geocode"
               ]
             },
-            "description": "Validation only \u2014 Nominatim is not called.",
+            "description": "Validation only — Nominatim is not called.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"query\": \"   \"\n}",
@@ -832,7 +832,7 @@
                 "location"
               ]
             },
-            "description": "What the client does after a geocode: store the result on the tasting. The tasting is `unknown` at this point, so an automated precision is accepted. The body is built from the `geocode_*` variables saved by \"Geocode a Place\" (raw JSON, numbers unquoted \u2014 see the pre-request script).",
+            "description": "What the client does after a geocode: store the result on the tasting. The tasting is `unknown` at this point, so an automated precision is accepted. The body is built from the `geocode_*` variables saved by \"Geocode a Place\" (raw JSON, numbers unquoted — see the pre-request script).",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"lat\": \"{{geocode_lat}}\",\n  \"lon\": \"{{geocode_lon}}\",\n  \"precision\": \"{{geocode_precision}}\"\n}",
@@ -924,7 +924,7 @@
           ]
         },
         {
-          "name": "Set Automated Location (rejected \u2014 409 expected)",
+          "name": "Set Automated Location (rejected — 409 expected)",
           "request": {
             "method": "PUT",
             "header": [
@@ -1134,7 +1134,7 @@
                 "location"
               ]
             },
-            "description": "Clears lat/lon even over a manual pin \u2014 this is the one precision value that always wins. The tasting is back on the \"NOT PLACED\" shelf.",
+            "description": "Clears lat/lon even over a manual pin — this is the one precision value that always wins. The tasting is back on the \"NOT PLACED\" shelf.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"precision\": \"unknown\"\n}",
@@ -1261,7 +1261,7 @@
                 "regions"
               ]
             },
-            "description": "The curated region picker: countries in seed order, each with `subregions` (may be empty). Every row carries an approximate centroid `lat`/`lon` \u2014 the Atlas uses it as the fallback pin for a tasting that has no resolved location. Send the returned `ETag` back as `If-None-Match` to get a bodyless `304`. Stores the Islay id in `region_id` for the next request."
+            "description": "The curated region picker: countries in seed order, each with `subregions` (may be empty). Every row carries an approximate centroid `lat`/`lon` — the Atlas uses it as the fallback pin for a tasting that has no resolved location. Send the returned `ETag` back as `If-None-Match` to get a bodyless `304`. Stores the Islay id in `region_id` for the next request."
           },
           "response": [],
           "event": [
@@ -1497,7 +1497,7 @@
       }
     },
     {
-      "name": "Tasteep \u2014 Cleanup",
+      "name": "Tasteep — Cleanup",
       "description": "Removes the two tastings the run created so it can be repeated. Sign Out lives in the Auth folder on purpose: it revokes `tasteep_token`, so run it only when you are done.",
       "item": [
         {
@@ -1637,102 +1637,135 @@
       }
     },
     {
-      "name": "SMWS \u2014 Watchtower (public)",
+      "name": "Tasteep — SMWS bottles",
+      "description": "Bottles scraped from smws.eu. `status=available|delisted|all`, `distillery_code`, `region_id`, `limit` (<=200), `offset`.",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{tasteep_token}}",
+            "type": "string"
+          }
+        ]
+      },
       "item": [
         {
-          "name": "Live Inventory",
+          "name": "List available bottles",
           "request": {
             "method": "GET",
+            "header": [],
             "url": {
-              "raw": "{{base_url}}/smws/watchtower/live",
+              "raw": "{{base_url}}/tasteep/smws-bottles",
               "host": [
                 "{{base_url}}"
               ],
               "path": [
-                "smws",
-                "watchtower",
-                "live"
-              ]
+                "tasteep",
+                "smws-bottles"
+              ],
+              "query": []
             },
-            "description": "No auth. Bottles currently listed on smws.eu, newest first."
-          }
+            "description": "Available bottles, newest first."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         },
         {
-          "name": "Archive Inventory",
+          "name": "List delisted bottles (archive)",
           "request": {
             "method": "GET",
+            "header": [],
             "url": {
-              "raw": "{{base_url}}/smws/watchtower/archive",
+              "raw": "{{base_url}}/tasteep/smws-bottles?status=delisted&limit=20",
               "host": [
                 "{{base_url}}"
               ],
               "path": [
-                "smws",
-                "watchtower",
-                "archive"
+                "tasteep",
+                "smws-bottles"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "delisted"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
               ]
             },
-            "description": "No auth. Every bottle the archive scraper has ever seen, newest first."
-          }
-        }
-      ]
-    },
-    {
-      "name": "SMWS \u2014 Scraper (x-api-key)",
-      "item": [
-        {
-          "name": "Run Live Scraper",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "x-api-key",
-                "value": "{{scraper_api_key}}"
+            "description": "Bottles no longer listed, most recently delisted first."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
               }
-            ],
-            "url": {
-              "raw": "{{base_url}}/smws/scraper/run-live",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "smws",
-                "scraper",
-                "run-live"
-              ]
-            },
-            "description": "Triggers the live scraper immediately. Requires SMWS_SCRAPER_API_KEY to be set server-side and matched here \u2014 403 otherwise."
-          }
+            }
+          ]
         },
         {
-          "name": "Run Archive Scraper",
+          "name": "Filter by distillery and region",
           "request": {
             "method": "GET",
-            "header": [
-              {
-                "key": "x-api-key",
-                "value": "{{scraper_api_key}}"
-              }
-            ],
+            "header": [],
             "url": {
-              "raw": "{{base_url}}/smws/scraper/run-archive",
+              "raw": "{{base_url}}/tasteep/smws-bottles?distillery_code=1&region_id=scotland",
               "host": [
                 "{{base_url}}"
               ],
               "path": [
-                "smws",
-                "scraper",
-                "run-archive"
+                "tasteep",
+                "smws-bottles"
+              ],
+              "query": [
+                {
+                  "key": "distillery_code",
+                  "value": "1"
+                },
+                {
+                  "key": "region_id",
+                  "value": "scotland"
+                }
               ]
             },
-            "description": "Triggers the archive scraper immediately. Same auth as run-live."
-          }
+            "description": "A country also matches its subregions."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
     {
       "name": "Admin (dashboard API)",
-      "description": "Needs `admin_token`: a normal Tasteep bearer token for an account whose email is in the backend's ADMIN_EMAILS, from a session created within ADMIN_SESSION_MAX_HOURS (default 12h). Sign in via Tasteep \u2014 Auth, then paste the token here.",
+      "description": "Needs `admin_token`: a normal Tasteep bearer token for an account whose email is in the backend's ADMIN_EMAILS, from a session created within ADMIN_SESSION_MAX_HOURS (default 12h). Sign in via Tasteep — Auth, then paste the token here.",
       "auth": {
         "type": "bearer",
         "bearer": [
@@ -1801,7 +1834,7 @@
                 }
               ]
             },
-            "description": "Paginated (limit \u2264 200, offset). Optional q (email/name substring) and provider."
+            "description": "Paginated (limit ≤ 200, offset). Optional q (email/name substring) and provider."
           },
           "response": [],
           "event": [
@@ -1992,12 +2025,12 @@
           ]
         },
         {
-          "name": "Run live scraper",
+          "name": "Run SMWS scraper",
           "request": {
             "method": "POST",
             "header": [],
             "url": {
-              "raw": "{{base_url}}/admin/smws/scraper/run-live",
+              "raw": "{{base_url}}/admin/smws/scraper/run",
               "host": [
                 "{{base_url}}"
               ],
@@ -2005,7 +2038,7 @@
                 "admin",
                 "smws",
                 "scraper",
-                "run-live"
+                "run"
               ]
             },
             "description": "Fire-and-forget. 202 when started, 409 if already running."
@@ -2227,7 +2260,7 @@
                 "smws-codes"
               ]
             },
-            "description": "`region_id` absent \u2192 resolved from `region`. `409` if the code is live; a deleted code is revived with these values.",
+            "description": "`region_id` absent → resolved from `region`. `409` if the code is live; a deleted code is revived with these values.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"code\": \"ZZ9999\",\n  \"distillery_name\": \"Postman Distillery\",\n  \"category\": \"single malt\",\n  \"region\": \"Islay\",\n  \"extra\": null\n}"
