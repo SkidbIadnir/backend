@@ -63,7 +63,7 @@ describe('SmwsBottlesService', () => {
     it('defaults to available bottles, newest first, 50 per page', async () => {
       const page = await service.list();
       expect(qb.andWhere).toHaveBeenCalledWith('b.delisted_at IS NULL');
-      expect(qb.orderBy).toHaveBeenCalledWith('b.first_seen_at', 'DESC');
+      expect(qb.orderBy).toHaveBeenCalledWith('b.firstSeenAt', 'DESC');
       expect(qb.take).toHaveBeenCalledWith(50);
       expect(page.total).toBe(1);
       expect(page.items[0]).toEqual(
@@ -91,7 +91,7 @@ describe('SmwsBottlesService', () => {
         '(b.region_id = :rid OR r.parent_id = :rid)',
         { rid: 'scotland' },
       );
-      expect(qb.orderBy).toHaveBeenCalledWith('b.delisted_at', 'DESC');
+      expect(qb.orderBy).toHaveBeenCalledWith('b.delistedAt', 'DESC');
     });
 
     it.each([

@@ -114,10 +114,12 @@ export class SmwsBottlesService {
         rid: query.region_id,
       });
     }
+    // Property names, not column names: with a join plus skip/take, TypeORM
+    // resolves ORDER BY through the entity metadata and fails on column names.
     if (status === 'delisted') {
-      qb.orderBy('b.delisted_at', 'DESC');
+      qb.orderBy('b.delistedAt', 'DESC');
     } else {
-      qb.orderBy('b.first_seen_at', 'DESC');
+      qb.orderBy('b.firstSeenAt', 'DESC');
     }
     qb.addOrderBy('b.code', 'ASC').skip(offset).take(limit);
 
