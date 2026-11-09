@@ -57,7 +57,11 @@ export class TasteepSmwsScrapeRun {
   @Column({ type: 'integer', nullable: true })
   missed: number | null;
 
-  /** Bottles that reached the miss threshold this run. */
+  /** Bottles missing from the listing but confirmed in stock on their own page (no miss counted). */
+  @Column({ type: 'integer', nullable: true })
+  confirmed: number | null;
+
+  /** Bottles that reached the miss threshold this run, or were confirmed out of stock. */
   @Column({ type: 'integer', nullable: true })
   delisted: number | null;
 

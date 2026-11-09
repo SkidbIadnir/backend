@@ -74,6 +74,7 @@ export interface SmwsScrapeRunJson {
   added: number | null;
   relisted: number | null;
   missed: number | null;
+  confirmed: number | null;
   delisted: number | null;
   note: string | null;
   error: string | null;
@@ -93,6 +94,7 @@ export function toSmwsScrapeRunJson(
     added: r.added,
     relisted: r.relisted,
     missed: r.missed,
+    confirmed: r.confirmed,
     delisted: r.delisted,
     note: r.note,
     error: r.error,

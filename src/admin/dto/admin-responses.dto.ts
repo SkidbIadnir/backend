@@ -150,6 +150,8 @@ export class SmwsScrapeRunJson {
   added: number | null;
   relisted: number | null;
   missed: number | null;
+  /** Missing from the listing but confirmed in stock on their page. */
+  confirmed: number | null;
   delisted: number | null;
   note: string | null;
   error: string | null;

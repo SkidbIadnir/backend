@@ -131,8 +131,11 @@ Availability rules (`smws-bottle-sync.rules.ts`):
 - A run is **trusted** only if the listing completed and lists at least 80% of the bottles
   currently available. Untrusted runs (`partial`) still record seen and new bottles but never
   delist anything.
-- An available bottle missing from a trusted run gets a miss; it is delisted after **2 trusted
-  misses in a row**. A delisted bottle that shows up again is relisted.
+- An available bottle missing from a trusted run is first checked on its own page (the shop's
+  `instock` flag): **in stock** means the listing skipped it, so no miss is counted (`confirmed`
+  in the run log); **out of stock** delists it at once; an unreadable page falls back to the miss
+  rule: delisted after **2 trusted misses in a row**. A delisted bottle that shows up again is
+  relisted.
 - One run at a time across processes (Postgres advisory lock); all writes of a run happen in one
   transaction; every run is logged in `tasteep_smws_scrape_runs` (shown by `GET /admin/smws/status`).
 

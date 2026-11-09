@@ -45,6 +45,11 @@ export interface SmwsSiteSession {
   listProducts(): Promise<ListedProducts>;
   /** `null` when the page has no SMWS cask code (gift sets, events, blends…). Throws on navigation errors. */
   readBottle(url: string): Promise<ScrapedBottle | null>;
+  /**
+   * Stock status from the page's own shop data (`BCData.product_attributes.instock`):
+   * `true`/`false`, or `null` when the page carries none. Throws on navigation errors.
+   */
+  checkStock(url: string): Promise<boolean | null>;
   close(): Promise<void>;
 }
 
@@ -71,6 +76,7 @@ export class SmwsSiteScraper {
       return {
         listProducts: () => this.listProducts(page),
         readBottle: (url) => this.readBottle(page, url),
+        checkStock: (url) => this.checkStock(page, url),
         close: () => browser.close(),
       };
     } catch (error) {
@@ -166,6 +172,26 @@ export class SmwsSiteScraper {
     }
 
     return { urls: [...urls], pages: pageNumber - 1, complete };
+  }
+
+  private async checkStock(page: Page, url: string): Promise<boolean | null> {
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+    return page.evaluate(() => {
+      const fromGlobal = (
+        window as unknown as {
+          BCData?: { product_attributes?: { instock?: unknown } };
+        }
+      ).BCData?.product_attributes?.instock;
+      if (typeof fromGlobal === 'boolean') return fromGlobal;
+      // Fallback: the inline script that defines BCData.
+      for (const script of document.querySelectorAll('script')) {
+        const text = script.textContent ?? '';
+        if (!text.includes('BCData')) continue;
+        const match = text.match(/"instock"\s*:\s*(true|false)/);
+        if (match) return match[1] === 'true';
+      }
+      return null;
+    });
   }
 
   private async readBottle(
