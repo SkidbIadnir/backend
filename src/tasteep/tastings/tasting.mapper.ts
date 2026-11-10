@@ -10,6 +10,8 @@ export interface TastingJson {
   distillery: string | null;
   region: string | null;
   region_id: string | null;
+  /** SKU of the SMWS bottle (`GET /tasteep/smws-bottles/:sku`), or `null`. */
+  smws_sku: string | null;
   abv: number | null;
   price: number | null;
   age_statement: string | null;
@@ -41,6 +43,7 @@ export function toTastingJson(t: TasteepTasting): TastingJson {
     distillery: t.distillery ?? null,
     region: t.region ?? null,
     region_id: t.regionId ?? null,
+    smws_sku: t.smwsSku ?? null,
     abv: t.abv ?? null,
     price: t.price ?? null,
     age_statement: t.ageStatement ?? null,
@@ -64,7 +67,8 @@ export function toTastingJson(t: TasteepTasting): TastingJson {
 /**
  * Full-replacement semantics: a key that is absent or null in the body
  * becomes null on the row (PUT, not PATCH). Defaults apply for the three
- * non-nullable enum/array fields.
+ * non-nullable enum/array fields. `smws_sku` is the exception, set by
+ * `TastingsService.upsert` (see `UpsertTastingDto.smws_sku`).
  */
 export function applyUpsertDto(
   target: TasteepTasting,

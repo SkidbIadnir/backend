@@ -54,7 +54,13 @@ describe('SmwsBottlesService', () => {
       unknown_distillery: '0',
       last_seen_at: new Date('2026-11-09T00:00:00Z'),
     });
-    for (const m of ['leftJoin', 'leftJoinAndSelect', 'skip', 'take']) {
+    for (const m of [
+      'leftJoin',
+      'leftJoinAndSelect',
+      'setParameters',
+      'offset',
+      'limit',
+    ]) {
       qb[m] = jest.fn().mockReturnValue(qb);
     }
     qb.getManyAndCount = jest.fn().mockResolvedValue([[row()], 1]);
@@ -81,12 +87,16 @@ describe('SmwsBottlesService', () => {
     it('defaults to available bottles, newest release first, 50 per page', async () => {
       const page = await service.list();
       expect(qb.andWhere).toHaveBeenCalledWith('b.in_stock = true');
+      expect(qb.addSelect).toHaveBeenCalledWith(
+        '(b.released_at)',
+        'sort_released',
+      );
       expect(qb.addOrderBy).toHaveBeenCalledWith(
-        'b.releasedAt',
+        'sort_released',
         'DESC',
         'NULLS LAST',
       );
-      expect(qb.take).toHaveBeenCalledWith(50);
+      expect(qb.limit).toHaveBeenCalledWith(50);
       expect(page.total).toBe(1);
       expect(page.items[0]).toEqual(
         expect.objectContaining({
@@ -122,11 +132,13 @@ describe('SmwsBottlesService', () => {
         '(b.region_id = :rid OR r.parent_id = :rid)',
         { rid: 'scotland' },
       );
-      expect(qb.orderBy).toHaveBeenCalledWith(
-        'b.delistedAt',
-        'DESC',
-        'NULLS LAST',
+      expect(qb.addSelect).toHaveBeenCalledWith(
+        '(b.delisted_at)',
+        'sort_value',
       );
+      // Sold-out date first, then the release date.
+      const order = qb.addOrderBy.mock.calls.map((c: unknown[]) => c[0]);
+      expect(order.slice(0, 2)).toEqual(['sort_value', 'sort_released']);
     });
 
     it.each([
@@ -137,6 +149,81 @@ describe('SmwsBottlesService', () => {
       [{ offset: '-1' }],
     ])('400s on %o', async (query) => {
       await expect(service.list(query)).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('search', () => {
+    it('searches every bottle, 20 per page, best match first', async () => {
+      await service.search({ q: 'smoke peat' });
+      expect(qb.andWhere).not.toHaveBeenCalledWith('b.in_stock = true');
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('LIKE :word0'),
+        { word0: '%smoke%' },
+      );
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('LIKE :word1'),
+        { word1: '%peat%' },
+      );
+      expect(qb.addOrderBy).toHaveBeenNthCalledWith(
+        1,
+        'sort_rank',
+        'ASC',
+        'NULLS LAST',
+      );
+      expect(qb.limit).toHaveBeenCalledWith(20);
+    });
+
+    it('matches a typed code by prefix, shortest code first', async () => {
+      await service.search({ q: '29.2' });
+      expect(qb.andWhere).toHaveBeenCalledWith('b.code LIKE :codePrefix', {
+        codePrefix: '29.2%',
+      });
+      expect(qb.addSelect).toHaveBeenCalledWith(
+        '(length(b.code))',
+        'sort_rank',
+      );
+    });
+
+    it('escapes LIKE wildcards in the text', async () => {
+      await service.search({ q: '100%' });
+      expect(qb.andWhere).toHaveBeenCalledWith(expect.any(String), {
+        word0: '%100\\%%',
+      });
+    });
+
+    it('filters by field and range and sorts by a value', async () => {
+      await service.search({
+        profile: 'Deep, Rich & Dried Fruits',
+        cask: 'oloroso',
+        abv_min: '55',
+        age_max: '20',
+        category: 'rum',
+        sort: 'abv',
+        order: 'asc',
+      });
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('= :profileKey'),
+        { profileKey: 'deeprichdriedfruits' },
+      );
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('LIKE :cask0'),
+        { cask0: '%oloroso%' },
+      );
+      expect(qb.andWhere).toHaveBeenCalledWith('b.abv >= :abvMin', {
+        abvMin: 55,
+      });
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('<= :ageMax'),
+        { ageMax: 20 },
+      );
+      expect(qb.andWhere).toHaveBeenCalledWith('c.category = :category', {
+        category: 'rum',
+      });
+      expect(qb.addOrderBy).toHaveBeenCalledWith(
+        'sort_value',
+        'ASC',
+        'NULLS LAST',
+      );
     });
   });
 

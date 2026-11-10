@@ -8,6 +8,8 @@ import {
 import { In } from 'typeorm';
 import { TastingsService } from './tastings.service';
 import { RegionsService } from '../regions/regions.service';
+import { SmwsBottlesService } from '../smws-bottles/smws-bottles.service';
+import type { TasteepSmwsBottle } from '../entities/tasteep-smws-bottle.entity';
 import { TasteepTasting } from '../entities/tasteep-tasting.entity';
 import {
   createMockQueryBuilder,
@@ -27,15 +29,49 @@ describe('TastingsService', () => {
   let service: TastingsService;
   let repo: MockRepository<TasteepTasting>;
   const regions = { resolve: jest.fn() };
+  const bottles = { findRow: jest.fn(), findRowOrNull: jest.fn() };
+  const bottle = (over: Partial<TasteepSmwsBottle> = {}) =>
+    ({
+      sku: '029311GX0700612',
+      kind: 'single_cask',
+      code: '29.311',
+      distilleryCode: '29',
+      caskNo: '311',
+      batch: null,
+      name: 'Diesel à la crème',
+      url: 'https://smws.eu/diesel-a-la-creme',
+      smwsCode: { distilleryName: 'Laphroaig', category: 'single malt' },
+      regionText: 'Islay',
+      regionId: 'scotland/islay',
+      priceText: '€120.00',
+      priceAmount: 120,
+      priceCurrency: 'EUR',
+      abv: 58.4,
+      age: '10 years',
+      caskType: '1st fill US oak ex-oloroso barrel',
+      distilledDate: '2014-03-01',
+      profile: null,
+      categories: [],
+      releasedAt: null,
+      inStock: false,
+      stock: null,
+      firstSeenAt: new Date('2026-11-01T00:00:00Z'),
+      lastSeenAt: new Date('2026-11-09T00:00:00Z'),
+      delistedAt: null,
+      ...over,
+    }) as TasteepSmwsBottle;
 
   beforeEach(async () => {
     repo = createMockRepository<TasteepTasting>();
     regions.resolve.mockReset().mockResolvedValue(null);
+    bottles.findRow.mockReset();
+    bottles.findRowOrNull.mockReset().mockResolvedValue(null);
     const module = await Test.createTestingModule({
       providers: [
         TastingsService,
         { provide: getRepositoryToken(TasteepTasting), useValue: repo },
         { provide: RegionsService, useValue: regions },
+        { provide: SmwsBottlesService, useValue: bottles },
       ],
     }).compile();
     service = module.get(TastingsService);
@@ -225,6 +261,130 @@ describe('TastingsService', () => {
         lon: 2,
         locationPrecision: 'manual',
       });
+    });
+  });
+
+  describe('SMWS bottle link', () => {
+    const save = () => {
+      repo.save!.mockImplementation((t: TasteepTasting) => Promise.resolve(t));
+    };
+    const saved = () => (repo.save!.mock.calls as TasteepTasting[][])[0][0];
+
+    it('links the bottle the body names, by SKU or cask code', async () => {
+      repo
+        .findOne!.mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(makeTasting());
+      save();
+      bottles.findRowOrNull.mockResolvedValue(bottle());
+      await service.upsert(
+        USER_ID,
+        TASTING_ID,
+        makeUpsertDto({ smws_sku: '29.311' }),
+      );
+      expect(bottles.findRowOrNull).toHaveBeenCalledWith('29.311');
+      expect(saved().smwsSku).toBe('029311GX0700612');
+    });
+
+    it('400s an unknown bottle and saves nothing', async () => {
+      repo.findOne!.mockResolvedValueOnce(null);
+      await expect(
+        service.upsert(
+          USER_ID,
+          TASTING_ID,
+          makeUpsertDto({ smws_sku: 'nope' }),
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(repo.save).not.toHaveBeenCalled();
+    });
+
+    it('unlinks on an explicit null', async () => {
+      const linked = makeTasting({ smwsSku: '029311GX0700612' });
+      repo.findOne!.mockResolvedValueOnce(linked).mockResolvedValueOnce(linked);
+      save();
+      await service.upsert(
+        USER_ID,
+        TASTING_ID,
+        makeUpsertDto({ name: '29.311 Diesel', smws_sku: null }),
+      );
+      expect(saved().smwsSku).toBeNull();
+      expect(bottles.findRowOrNull).not.toHaveBeenCalled();
+    });
+
+    it('keeps the stored link when the body leaves the key out', async () => {
+      const linked = makeTasting({ smwsSku: '029311GX0700612' });
+      repo.findOne!.mockResolvedValueOnce(linked).mockResolvedValueOnce(linked);
+      save();
+      await service.upsert(USER_ID, TASTING_ID, makeUpsertDto({ score: 90 }));
+      expect(saved().smwsSku).toBe('029311GX0700612');
+      expect(bottles.findRowOrNull).not.toHaveBeenCalled();
+    });
+
+    it('links from a cask code the name starts with', async () => {
+      repo
+        .findOne!.mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(makeTasting());
+      save();
+      bottles.findRowOrNull.mockResolvedValue(bottle());
+      await service.upsert(
+        USER_ID,
+        TASTING_ID,
+        makeUpsertDto({ name: 'SMWS 29.311 at the bar' }),
+      );
+      expect(bottles.findRowOrNull).toHaveBeenCalledWith('29.311');
+      expect(saved().smwsSku).toBe('029311GX0700612');
+    });
+
+    it('leaves an ordinary name unlinked', async () => {
+      repo
+        .findOne!.mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(makeTasting());
+      save();
+      await service.upsert(USER_ID, TASTING_ID, makeUpsertDto());
+      expect(bottles.findRowOrNull).not.toHaveBeenCalled();
+      expect(saved().smwsSku).toBeNull();
+    });
+  });
+
+  describe('prefill', () => {
+    it('fills a tasting from the bottle and lists earlier tastings of it', async () => {
+      bottles.findRow.mockResolvedValue(bottle());
+      repo.find!.mockResolvedValue([
+        makeTasting({ name: '29.311 Diesel', smwsSku: '029311GX0700612' }),
+      ]);
+      const result = await service.prefill(USER_ID, '29.311');
+      expect(repo.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { userId: USER_ID, smwsSku: '029311GX0700612' },
+        }),
+      );
+      expect(result.tasting).toEqual({
+        name: '29.311 Diesel à la crème',
+        category: 'whisky',
+        distillery: 'Laphroaig',
+        region: 'Islay',
+        region_id: 'scotland/islay',
+        abv: 58.4,
+        price: 120,
+        age_statement: '10',
+        cask_type: '1st fill US oak ex-oloroso barrel',
+        smws_sku: '029311GX0700612',
+      });
+      expect(result.bottle.code).toBe('29.311');
+      expect(result.previous_tastings).toEqual([
+        {
+          id: TASTING_ID,
+          name: '29.311 Diesel',
+          date_tasted: '2026-03-10T19:00:00.000Z',
+          score: 88,
+        },
+      ]);
+    });
+
+    it('propagates the 404 of an unknown bottle', async () => {
+      bottles.findRow.mockRejectedValue(new NotFoundException());
+      await expect(service.prefill(USER_ID, '9.999')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
     });
   });
 
