@@ -54,6 +54,17 @@ export class UpsertTastingDto {
   @MaxLength(200)
   region_id?: string | null;
 
+  /**
+   * SKU (or cask code) of the SMWS bottle picked in the app; `400` if unknown.
+   * `null` unlinks. Left out, the stored link is kept (an app version without
+   * the picker does not erase it), or found from a cask code the name starts
+   * with (`29.311 Diesel à la crème`).
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  smws_sku?: string | null;
+
   @IsOptional()
   @IsNumber()
   @Min(0)

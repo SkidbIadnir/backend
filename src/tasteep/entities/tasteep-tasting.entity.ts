@@ -11,6 +11,7 @@ import {
 } from 'typeorm';
 import { TasteepUser } from './tasteep-user.entity';
 import { TasteepRegion } from './tasteep-region.entity';
+import { TasteepSmwsBottle } from './tasteep-smws-bottle.entity';
 
 export const TASTING_CATEGORIES = ['whisky', 'rum', 'agave', 'other'] as const;
 export type TastingCategory = (typeof TASTING_CATEGORIES)[number];
@@ -41,6 +42,7 @@ const numericTransformer = {
 @Entity('tasteep_tastings')
 @Index('tasteep_tastings_user_date_idx', ['userId', 'dateTasted'])
 @Index('tasteep_tastings_user_category_idx', ['userId', 'category'])
+@Index('tasteep_tastings_user_smws_sku_idx', ['userId', 'smwsSku'])
 @Check(
   'tasteep_tastings_category_chk',
   `category IN ('whisky', 'rum', 'agave', 'other')`,
@@ -93,6 +95,17 @@ export class TasteepTasting {
 
   @Column({ name: 'region_id', type: 'text', nullable: true })
   regionId: string | null;
+
+  /**
+   * The SMWS bottle this tasting is of (`tasteep_smws_catalog.sku`), when the
+   * user picked it from the catalog or the name starts with its cask code.
+   */
+  @ManyToOne(() => TasteepSmwsBottle, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'smws_sku' })
+  smwsBottle: TasteepSmwsBottle | null;
+
+  @Column({ name: 'smws_sku', type: 'text', nullable: true })
+  smwsSku: string | null;
 
   @Column({ type: 'numeric', nullable: true, transformer: numericTransformer })
   abv: number | null;

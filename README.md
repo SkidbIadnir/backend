@@ -30,7 +30,7 @@ src/
 │   │   ├── auth-user.ts                 AuthUser JSON mapper
 │   │   └── dto/
 │   ├── mail/                nodemailer SMTP transport (logs the code when SMTP is unset)
-│   ├── tastings/            /tasteep/tastings, /tasteep/stats
+│   ├── tastings/            /tasteep/tastings, /tasteep/stats, prefill from an SMWS bottle
 │   │   ├── tastings.controller.ts / .service.ts / .module.ts
 │   │   ├── tasting.mapper.ts            entity ⇄ snake_case JSON contract
 │   │   └── dto/
@@ -42,7 +42,8 @@ src/
 │   │   ├── smws-product.parser.ts       pure: product page HTML → raw fields (cheerio)
 │   │   ├── smws-catalog.rules.ts        pure: raw fields → bottle, merge that never loses a value
 │   │   ├── smws-bottle-sync.service.ts  one run: lock, discover, stock check, relist sweep
-│   │   ├── smws-bottles.service.ts      reads for the app and the admin status
+│   │   ├── smws-bottle.search.ts        pure: list/search query → validated filters
+│   │   ├── smws-bottles.service.ts      list, search, facets for the app; admin status
 │   │   └── smws-scrape.scheduler.ts     nightly cron
 │   ├── wishlist/            /tasteep/wishlist — folders and items
 │   └── test-utils/          Tasteep fixtures

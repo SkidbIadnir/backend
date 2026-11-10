@@ -20,6 +20,7 @@ describe('tasting.mapper', () => {
           'distillery',
           'region',
           'region_id',
+          'smws_sku',
           'abv',
           'price',
           'age_statement',
