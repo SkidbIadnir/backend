@@ -133,6 +133,13 @@
     { "main": "South Korea", "lat": 36.5, "lon": 127.8, "sub": [] },
     { "main": "Mexico", "lat": 23.6, "lon": -102.5, "sub": [] },
     { "main": "Argentina", "lat": -35.0, "lon": -65.0, "sub": [] },
-    { "main": "Brazil", "lat": -10.8, "lon": -53.0, "sub": [] }
+    { "main": "Brazil", "lat": -10.8, "lon": -53.0, "sub": [] },
+    { "main": "Jamaica", "lat": 18.1, "lon": -77.3, "sub": [] },
+    { "main": "Barbados", "lat": 13.2, "lon": -59.55, "sub": [] },
+    { "main": "Trinidad and Tobago", "lat": 10.45, "lon": -61.25, "aliases": ["Trinidad", "Tobago"], "sub": [] },
+    { "main": "Guyana", "lat": 4.9, "lon": -58.9, "sub": [] },
+    { "main": "Panama", "lat": 8.5, "lon": -80.0, "sub": [] },
+    { "main": "Nicaragua", "lat": 12.9, "lon": -85.2, "sub": [] },
+    { "main": "Belize", "lat": 17.2, "lon": -88.7, "sub": [] }
   ]
 }

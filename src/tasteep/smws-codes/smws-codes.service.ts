@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'node:crypto';
-import { Repository } from 'typeorm';
+import { IsNull, Not, Repository } from 'typeorm';
 import { TasteepSmwsCode } from '../entities/tasteep-smws-code.entity';
 import { RegionsService } from '../regions/regions.service';
 import { CreateSmwsCodeDto, UpdateSmwsCodeDto } from './dto/smws-code.dto';
@@ -178,7 +178,28 @@ export class SmwsCodesService implements OnModuleInit {
     this.logger.log(
       `Seeded ${rows.length} new SMWS code(s); ${existing.size} already present.`,
     );
+    await this.linkUnresolvedRegions();
     return rows.length;
+  }
+
+  /**
+   * Links codes whose region text had no curated region when they were
+   * inserted (the rum codes before Jamaica, Guyana… were added). Only fills
+   * an empty `region_id`; a region set from the dashboard is never changed.
+   */
+  async linkUnresolvedRegions(): Promise<number> {
+    const unlinked = await this.repo.find({
+      where: { regionId: IsNull(), region: Not(IsNull()) },
+    });
+    let linked = 0;
+    for (const row of unlinked) {
+      const region = await this.regions.resolve(null, row.region);
+      if (!region) continue;
+      await this.repo.update({ code: row.code }, { regionId: region.id });
+      linked++;
+    }
+    if (linked) this.logger.log(`Linked ${linked} SMWS code(s) to a region.`);
+    return linked;
   }
 
   /** Every live code, in seed order, with its content hash. */
