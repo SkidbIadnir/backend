@@ -227,6 +227,50 @@ describe('SmwsBottlesService', () => {
     });
   });
 
+  it('filters bottles without a profile', async () => {
+    await service.search({ profile: 'none' });
+    expect(qb.andWhere).toHaveBeenCalledWith('b.profile IS NULL');
+  });
+
+  it('adds the shop counts and the last sync to the facets', async () => {
+    const facetQb = createMockQueryBuilder(
+      { available: '107', delisted: '2212', abv_min: '40.1' },
+      [],
+    );
+    for (const m of ['innerJoin', 'setParameters']) {
+      facetQb[m] = jest.fn().mockReturnValue(facetQb);
+    }
+    bottles.createQueryBuilder!.mockReturnValue(facetQb);
+    runs.findOne!.mockResolvedValue({
+      finishedAt: new Date('2026-11-10T09:16:23Z'),
+    });
+    const facets = await service.facets();
+    expect(runs.findOne).toHaveBeenCalledWith({
+      where: { status: 'succeeded' },
+      order: { finishedAt: 'DESC' },
+    });
+    expect(facets).toMatchObject({
+      available: 107,
+      delisted: 2212,
+      synced_at: '2026-11-10T09:16:23.000Z',
+      abv: { min: 40.1, max: null },
+    });
+  });
+
+  it('has no sync time before the first successful run', async () => {
+    const facetQb = createMockQueryBuilder({}, []);
+    for (const m of ['innerJoin', 'setParameters']) {
+      facetQb[m] = jest.fn().mockReturnValue(facetQb);
+    }
+    bottles.createQueryBuilder!.mockReturnValue(facetQb);
+    runs.findOne!.mockResolvedValue(null);
+    expect(await service.facets()).toMatchObject({
+      available: 0,
+      delisted: 0,
+      synced_at: null,
+    });
+  });
+
   it('404s an unknown code', async () => {
     bottles.findOne!.mockResolvedValue(null);
     await expect(service.get('9.999')).rejects.toThrow(NotFoundException);

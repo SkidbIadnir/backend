@@ -83,6 +83,7 @@ describe('TastingsService', () => {
       const result = await service.list(USER_ID);
       expect(repo.find).toHaveBeenCalledWith({
         where: { userId: USER_ID },
+        relations: { smwsBottle: true },
         order: {
           dateTasted: { direction: 'DESC', nulls: 'LAST' },
           createdAt: 'DESC',
@@ -90,6 +91,21 @@ describe('TastingsService', () => {
       });
       expect(result[0].id).toBe(TASTING_ID);
       expect(result[0].date_tasted).toBe('2026-03-10T19:00:00.000Z');
+    });
+
+    it('filters to one SMWS bottle or one SMWS distillery', async () => {
+      repo.find!.mockResolvedValue([]);
+      await service.list(USER_ID, { smwsSku: '029311GX0700612' });
+      await service.list(USER_ID, { smwsDistillery: 'g1' });
+      const calls = repo.find!.mock.calls as { where: object }[][];
+      expect(calls[0][0].where).toEqual({
+        userId: USER_ID,
+        smwsSku: '029311GX0700612',
+      });
+      expect(calls[1][0].where).toEqual({
+        userId: USER_ID,
+        smwsBottle: { distilleryCode: 'G1' },
+      });
     });
 
     it('filters to unknown/country precision when unplaced is set', async () => {

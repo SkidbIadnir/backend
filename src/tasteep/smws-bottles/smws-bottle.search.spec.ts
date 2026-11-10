@@ -112,6 +112,15 @@ describe('parseBottleSearch', () => {
     });
   });
 
+  it('reads profile=none as bottles without a profile', () => {
+    expect(
+      parseBottleSearch({ profile: 'None' }, SEARCH_DEFAULTS),
+    ).toMatchObject({ profileNone: true, profileKey: null });
+    expect(
+      parseBottleSearch({ profile: 'Peated' }, SEARCH_DEFAULTS),
+    ).toMatchObject({ profileNone: false, profileKey: 'peated' });
+  });
+
   it('keeps the first value of a repeated key', () => {
     const s = parseBottleSearch(
       { q: ['islay', 'speyside'] as unknown as string },

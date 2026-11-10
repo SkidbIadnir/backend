@@ -37,6 +37,7 @@ Exactly `lib/models/tasting.dart`. Every field except `id`, `name`, `category`, 
   "region": "Islay",                     // free text, kept verbatim
   "region_id": "scotland/islay",         // link into GET /tasteep/regions, or null
   "smws_sku": null,                      // SMWS bottle it is of (GET /tasteep/smws-bottles/:sku), or null
+  "smws_label": null,                    // read-only: that bottle's code, batch or name ("29.311"), or null
   "abv": 43,
   "price": 65.5,
   "age_statement": "16",
@@ -112,6 +113,8 @@ All scoped to the authenticated user; other users' rows are invisible (404).
 |---|---|---|---|
 | `GET` | `/tasteep/tastings` | — | `200 Tasting[]`, newest `date_tasted` first, undated last |
 | `GET` | `/tasteep/tastings?unplaced=true` | — | Same, only `location_precision` in `unknown`, `country` (the "NOT PLACED" shelf) |
+| `GET` | `/tasteep/tastings?smws_sku=…` | — | Same, only the tastings of one SMWS bottle |
+| `GET` | `/tasteep/tastings?smws_distillery=29` | — | Same, only the tastings of one SMWS distillery code |
 | `GET` | `/tasteep/tastings/:id` | — | `200 Tasting` / `404` |
 | `GET` | `/tasteep/tastings/prefill/:bottle` | — | `200 TastingPrefill` / `404` (see [Adding a tasting from an SMWS bottle](#adding-a-tasting-from-an-smws-bottle)) |
 | `PUT` | `/tasteep/tastings/:id` | `Tasting` (see below) | `200 Tasting` |
@@ -146,6 +149,8 @@ All scoped to the authenticated user; other users' rows are invisible (404).
   - **key left out** → the stored link is kept, so an app version without the field does
     not erase it. With no stored link, a name starting with a cask code
     (`"29.311 Diesel à la crème"`, `"SMWS 1.309"`) links that bottle.
+  - `smws_label` is computed by the server (the bottle's `code`, else `batch`, else `name`)
+    and ignored in the body.
 
 ### `PUT /tasteep/tastings/:id/location`
 
@@ -233,7 +238,7 @@ The list and the search take the same query parameters and differ only in their 
 | `category` | | | distillery code category from `facets` (`single malt`, `rum`, `bourbon`, `gin`…); blends have none |
 | `distillery_code` | | | code prefix, e.g. `1`, `G1` (case-insensitive) |
 | `region_id` | | | id from `GET /tasteep/regions`; a country also matches its subregions |
-| `profile` | | | flavour profile, punctuation and case ignored (`deep rich dried fruits`) |
+| `profile` | | | flavour profile, punctuation and case ignored (`deep rich dried fruits`); `none` = bottles without one |
 | `cask` | | | words all found in the cask type (`oloroso`, `1st fill sherry`) |
 | `abv_min` / `abv_max` | | | percent |
 | `age_min` / `age_max` | | | years (bottles with a stated age only) |
@@ -244,7 +249,8 @@ The list and the search take the same query parameters and differ only in their 
 | `order` | `desc` | `desc` | `asc` or `desc`; bottles without the value come last either way |
 | `limit` / `offset` | `50` / `0` | `20` / `0` | `limit` ≤ 200 (list) or ≤ 100 (search) |
 
-Malformed values are `400`. Unknown parameters are ignored.
+Malformed values are `400`. Unknown parameters are ignored. `limit=0` returns only `total`
+(`items: []`), for counts such as "Show 37 bottles".
 
 **`q`, the free text**, accepts what someone holding a bottle would type:
 
@@ -311,12 +317,54 @@ two-cask duos, gin, rum and beer; it has no `code` either.
   "age": {"min": 1, "max": 40},
   "price": {"min": 45, "max": 3480},
   "distilled_years": {"min": 1982, "max": 2022},
-  "released_years": {"min": 2021, "max": 2026}
+  "released_years": {"min": 2021, "max": 2026},
+  "available": 107,
+  "delisted": 2212,
+  "synced_at": "2026-11-10T09:16:23.298Z"
 }
 ```
 
+`available`/`delisted` count the bottles on sale and sold out. `synced_at` is when the last
+successful scrape ended (`null` before the first one): the app's "Synced 6 h ago".
+
 Profile spelling variants are merged under the most common one. Only about 20% of
 bottles carry a profile, so a profile filter narrows a lot.
+
+### Your SMWS
+
+`GET /tasteep/smws/me` → the signed-in user's SMWS progress, built from their tastings
+linked to a bottle (`smws_sku`):
+
+```json
+{
+  "linked_casks": 12,
+  "linked_tastings": 14,
+  "distilleries": {"tasted": 23, "total": 244, "codes": ["3", "4", "29", "33", …]},
+  "best": [
+    {"bottle": { …SmwsBottle… }, "score": 94, "tasting_id": "…", "date_tasted": "2026-11-02T19:00:00.000Z"}
+  ],
+  "by_profile": [{"profile": "Bold & Peaty", "avg_score": 91, "count": 4}],
+  "by_cask": [{"cask": "oloroso", "avg_score": 90, "count": 3}],
+  "untried": {
+    "regions": [{"region_id": "scotland/campbeltown", "name": "Campbeltown", "tasted": 0, "total": 3}],
+    "categories": [{"category": "rum", "tasted": 0, "total": 14}]
+  }
+}
+```
+
+- `distilleries.total` is every code in `GET /tasteep/smws-codes`; `codes` lists the ones
+  tasted, in that list's order.
+- `best`: up to 5 bottles, each with its best-scored tasting; highest score first, then the
+  most recent.
+- `by_profile`: average score per flavour profile (spelling variants merged), best first.
+  Unscored tastings and bottles without a profile are left out.
+- `by_cask`: the same per cask family. The free-text cask type is folded into one of
+  `oloroso`, `px`, `sherry`, `port`, `wine`, `rum`, `virgin_oak` (also heavy-toast and
+  numbered-char casks), `bourbon`, `other`; the first that matches wins, so a finish beats
+  the bourbon wood it started in.
+- `untried.regions`: regions where some codes are still untasted, fewest tasted first (10 at
+  most). `untried.categories`: codes-list categories with nothing tasted, largest first.
+- Averages have one decimal.
 
 ### Adding a tasting from an SMWS bottle
 

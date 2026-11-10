@@ -4,6 +4,7 @@ import {
   TastingsController,
 } from './tastings.controller';
 import { TastingsService } from './tastings.service';
+import { SmwsMeService } from './smws-me.service';
 import { TASTING_ID, USER_ID } from '../test-utils/fixtures';
 import type { TasteepAuthRequest } from '../auth/tasteep-jwt-auth.guard';
 
@@ -13,6 +14,7 @@ describe('Tasteep tastings controllers', () => {
   let tastings: TastingsController;
   let aggregates: TastingAggregatesController;
   let service: Record<string, jest.Mock>;
+  const smwsMe = { forUser: jest.fn().mockResolvedValue({}) };
 
   beforeEach(async () => {
     service = {
@@ -29,7 +31,10 @@ describe('Tasteep tastings controllers', () => {
     };
     const module = await Test.createTestingModule({
       controllers: [TastingsController, TastingAggregatesController],
-      providers: [{ provide: TastingsService, useValue: service }],
+      providers: [
+        { provide: TastingsService, useValue: service },
+        { provide: SmwsMeService, useValue: smwsMe },
+      ],
     }).compile();
     tastings = module.get(TastingsController);
     aggregates = module.get(TastingAggregatesController);
@@ -47,6 +52,23 @@ describe('Tasteep tastings controllers', () => {
       false,
     ]);
     expect(service.list.mock.calls[0][0]).toBe(USER_ID);
+  });
+
+  it('passes the SMWS bottle and distillery filters, trimmed', async () => {
+    await tastings.list(req, undefined, ' 029311GX0700612 ', undefined);
+    await tastings.list(req, undefined, undefined, '29');
+    await tastings.list(req, undefined, '  ', '');
+    expect(
+      (service.list.mock.calls as [string, object][]).map((c) => c[1]),
+    ).toEqual([
+      {
+        unplaced: false,
+        smwsSku: '029311GX0700612',
+        smwsDistillery: undefined,
+      },
+      { unplaced: false, smwsSku: undefined, smwsDistillery: '29' },
+      { unplaced: false, smwsSku: undefined, smwsDistillery: undefined },
+    ]);
   });
 
   it('routes upsert, delete and location to the service with the user id', async () => {
@@ -70,5 +92,10 @@ describe('Tasteep tastings controllers', () => {
   it('exposes stats under /tasteep', async () => {
     await aggregates.stats(req);
     expect(service.stats).toHaveBeenCalledWith(USER_ID);
+  });
+
+  it('exposes the SMWS progress of the signed-in user', async () => {
+    await aggregates.smws(req);
+    expect(smwsMe.forUser).toHaveBeenCalledWith(USER_ID);
   });
 });
