@@ -15,6 +15,7 @@ import {
 import { TasteepJwtAuthGuard } from '../auth/tasteep-jwt-auth.guard';
 import type { TasteepAuthRequest } from '../auth/tasteep-jwt-auth.guard';
 import { TastingsService } from './tastings.service';
+import { SmwsMeService } from './smws-me.service';
 import { UpsertTastingDto } from './dto/upsert-tasting.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
 
@@ -26,10 +27,27 @@ const isTruthy = (v: string | undefined) => v === 'true' || v === '1';
 export class TastingsController {
   constructor(private readonly tastings: TastingsService) {}
 
-  /** `?unplaced=true` → only `unknown`/`country` precision (the "NOT PLACED" shelf). */
+  /**
+   * `?unplaced=true` → only `unknown`/`country` precision (the "NOT PLACED"
+   * shelf). `?smws_sku=` → the tastings of one SMWS bottle;
+   * `?smws_distillery=29` → those of one SMWS distillery code.
+   */
   @Get()
-  list(@Req() req: TasteepAuthRequest, @Query('unplaced') unplaced?: string) {
-    return this.tastings.list(req.user.sub, { unplaced: isTruthy(unplaced) });
+  list(
+    @Req() req: TasteepAuthRequest,
+    @Query('unplaced') unplaced?: string,
+    @Query('smws_sku') smwsSku?: string,
+    @Query('smws_distillery') smwsDistillery?: string,
+  ) {
+    return this.tastings.list(req.user.sub, {
+      unplaced: isTruthy(unplaced),
+      smwsSku:
+        typeof smwsSku === 'string' ? smwsSku.trim() || undefined : undefined,
+      smwsDistillery:
+        typeof smwsDistillery === 'string'
+          ? smwsDistillery.trim() || undefined
+          : undefined,
+    });
   }
 
   /**
@@ -78,10 +96,19 @@ export class TastingsController {
 @Controller('tasteep')
 @UseGuards(TasteepJwtAuthGuard)
 export class TastingAggregatesController {
-  constructor(private readonly tastings: TastingsService) {}
+  constructor(
+    private readonly tastings: TastingsService,
+    private readonly smwsMe: SmwsMeService,
+  ) {}
 
   @Get('stats')
   stats(@Req() req: TasteepAuthRequest) {
     return this.tastings.stats(req.user.sub);
+  }
+
+  /** The user's SMWS progress, from tastings linked to a catalog bottle. */
+  @Get('smws/me')
+  smws(@Req() req: TasteepAuthRequest) {
+    return this.smwsMe.forUser(req.user.sub);
   }
 }

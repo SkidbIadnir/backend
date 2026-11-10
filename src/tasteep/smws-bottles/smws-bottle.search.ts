@@ -97,6 +97,8 @@ export interface BottleSearch {
   regionId: string | null;
   /** Lowercase letters only, so `Deep, Rich & Dried Fruits` = `deep rich dried fruits`. */
   profileKey: string | null;
+  /** `profile=none`: only bottles without a flavour profile. */
+  profileNone: boolean;
   /** Folded words, each found in the cask type (`sherry`, `1st fill oloroso`). */
   caskWords: string[];
   abv: Range;
@@ -262,6 +264,7 @@ export function parseBottleSearch(
     ? oneOf('kind', query.kind, SMWS_BOTTLE_KINDS, 'single_cask')
     : null;
   const profile = textParam(query.profile);
+  const profileNone = profile?.toLowerCase() === 'none';
   const cask = textParam(query.cask);
   return {
     text,
@@ -270,7 +273,8 @@ export function parseBottleSearch(
     category: textParam(query.category)?.toLowerCase() ?? null,
     distilleryCode: textParam(query.distillery_code)?.toUpperCase() ?? null,
     regionId: textParam(query.region_id),
-    profileKey: profile ? profileKey(profile) || null : null,
+    profileKey: profile && !profileNone ? profileKey(profile) || null : null,
+    profileNone,
     caskWords: cask
       ? fold(cask).split(/\s+/).filter(Boolean).slice(0, MAX_WORDS)
       : [],
