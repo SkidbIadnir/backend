@@ -150,8 +150,27 @@ describe('SmwsCodesService', () => {
       expect(insertQb.orIgnore).toHaveBeenCalled();
     });
 
+    it('links existing codes whose region text now resolves, and only those', async () => {
+      repo.find!.mockResolvedValueOnce(seedRows(SMALL)).mockResolvedValueOnce([
+        { code: '3', region: 'Islay', regionId: null },
+        { code: 'R1', region: 'Jamaica', regionId: null },
+      ]);
+      await service.seed(SMALL);
+      expect(repo.find).toHaveBeenLastCalledWith({
+        where: {
+          regionId: expect.anything() as unknown,
+          region: expect.anything() as unknown,
+        },
+      });
+      expect(repo.update).toHaveBeenCalledTimes(1);
+      expect(repo.update).toHaveBeenCalledWith(
+        { code: '3' },
+        { regionId: 'scotland/islay' },
+      );
+    });
+
     it('does nothing when every code is present', async () => {
-      repo.find!.mockResolvedValue(seedRows(SMALL));
+      repo.find!.mockResolvedValueOnce(seedRows(SMALL)).mockResolvedValue([]);
       await expect(service.seed(SMALL)).resolves.toBe(0);
       expect(insertQb.execute).not.toHaveBeenCalled();
     });

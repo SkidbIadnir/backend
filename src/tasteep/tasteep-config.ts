@@ -77,6 +77,17 @@ export const tasteepConfig = {
   get smwsScraperEnabled(): boolean {
     return process.env.TASTEEP_SMWS_SCRAPER_ENABLED !== 'false';
   },
+  /** Minimum gap between two requests to smws.eu, in ms (default 3000). */
+  get smwsRequestIntervalMs(): number {
+    const ms = parseInt(process.env.TASTEEP_SMWS_REQUEST_INTERVAL_MS ?? '', 10);
+    return Number.isFinite(ms) && ms >= 500 ? ms : 3000;
+  },
+  get smwsUserAgent(): string {
+    return (
+      process.env.TASTEEP_SMWS_USER_AGENT ||
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:145.0) Gecko/20100101 Firefox/145.0'
+    );
+  },
 };
 
 /** JWT `aud` claim, so a token minted for another app on the same secret is rejected. */
