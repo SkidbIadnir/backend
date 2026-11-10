@@ -3,12 +3,19 @@ import { TasteepSmwsScrapeRun } from '../entities/tasteep-smws-scrape-run.entity
 
 /** One entry of `GET /tasteep/smws-bottles`. */
 export interface SmwsBottleJson {
-  code: string;
-  distillery_code: string;
-  cask_no: string;
+  /** The shop's SKU: the bottle's stable id. */
+  sku: string;
+  /** `single_cask`, `blend` or `other` (packs, gift sets, gin, rum, beer). */
+  kind: string;
+  /** `1.309`; `null` unless `single_cask`. */
+  code: string | null;
+  distillery_code: string | null;
+  cask_no: string | null;
+  /** Blends: `Batch 40`, `Distillery 68 Rare Release`, `SM0.001`. */
+  batch: string | null;
   name: string;
   url: string;
-  /** From `tasteep_smws_codes`; `null` when the code is not in the reference list. */
+  /** From `tasteep_smws_codes`; `null` for blends or a code the list lacks. */
   distillery_name: string | null;
   category: string | null;
   region_text: string | null;
@@ -23,9 +30,14 @@ export interface SmwsBottleJson {
   /** `YYYY-MM-DD`. */
   distilled_date: string | null;
   profile: string | null;
+  /** The shop's release date. */
+  released_at: string | null;
   available: boolean;
+  /** Units left at the last check, when shown. */
+  stock: number | null;
   first_seen_at: string;
   last_seen_at: string;
+  /** When we saw it sell out; `null` if available or already sold out when first seen. */
   delisted_at: string | null;
 }
 
@@ -38,9 +50,12 @@ const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
 
 export function toSmwsBottleJson(b: TasteepSmwsBottle): SmwsBottleJson {
   return {
+    sku: b.sku,
+    kind: b.kind,
     code: b.code,
     distillery_code: b.distilleryCode,
     cask_no: b.caskNo,
+    batch: b.batch,
     name: b.name,
     url: b.url,
     distillery_name: b.smwsCode?.distilleryName ?? null,
@@ -55,7 +70,9 @@ export function toSmwsBottleJson(b: TasteepSmwsBottle): SmwsBottleJson {
     cask_type: b.caskType,
     distilled_date: b.distilledDate,
     profile: b.profile,
-    available: b.delistedAt === null,
+    released_at: iso(b.releasedAt),
+    available: b.inStock,
+    stock: b.stock,
     first_seen_at: b.firstSeenAt.toISOString(),
     last_seen_at: b.lastSeenAt.toISOString(),
     delisted_at: iso(b.delistedAt),
@@ -69,13 +86,13 @@ export interface SmwsScrapeRunJson {
   status: string;
   started_at: string;
   finished_at: string | null;
-  pages: number | null;
-  listed: number | null;
+  sitemap_urls: number | null;
+  discovered: number | null;
   added: number | null;
+  checked: number | null;
   relisted: number | null;
-  missed: number | null;
-  confirmed: number | null;
   delisted: number | null;
+  failed: number | null;
   note: string | null;
   error: string | null;
 }
@@ -89,13 +106,13 @@ export function toSmwsScrapeRunJson(
     status: r.status,
     started_at: r.startedAt.toISOString(),
     finished_at: iso(r.finishedAt),
-    pages: r.pages,
-    listed: r.listed,
+    sitemap_urls: r.sitemapUrls,
+    discovered: r.discovered,
     added: r.added,
+    checked: r.checked,
     relisted: r.relisted,
-    missed: r.missed,
-    confirmed: r.confirmed,
     delisted: r.delisted,
+    failed: r.failed,
     note: r.note,
     error: r.error,
   };

@@ -10,9 +10,6 @@ COPY package*.json ./
 # Install dependencies
 RUN npm install
 
-# Install Playwright Firefox (Mozilla) and required OS dependencies
-RUN npx playwright install --with-deps firefox
-
 # Copy the rest of the application code
 COPY . .
 

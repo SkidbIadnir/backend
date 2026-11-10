@@ -83,13 +83,16 @@ export function parseAbv(text: string | null | undefined): number | null {
   return value !== null && value > 0 && value <= 100 ? value : null;
 }
 
-/** `25/01/2012` → `2012-01-25`; `null` when not a valid `dd/mm/yyyy` date. */
+/** `25/01/2012` (or `25/01/12`) → `2012-01-25`; `null` when not a valid `dd/mm/yy[yy]` date. */
 export function parseDistilledDate(
   text: string | null | undefined,
 ): string | null {
-  const m = text?.trim().match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/);
+  const m = text?.trim().match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4}|\d{2})$/);
   if (!m) return null;
-  const [day, month, year] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  // Two-digit years (`11/01/18`): 00–49 → 2000s, 50–99 → 1900s.
+  const yy = Number(m[3]);
+  const year = m[3].length === 2 ? (yy < 50 ? 2000 + yy : 1900 + yy) : yy;
+  const [day, month] = [Number(m[1]), Number(m[2])];
   const date = new Date(Date.UTC(year, month - 1, day));
   if (
     date.getUTCFullYear() !== year ||
@@ -104,3 +107,60 @@ export function parseDistilledDate(
 /** Trimmed text, or `null` when empty. */
 export const textOrNull = (v: string | null | undefined): string | null =>
   v?.trim() ? v.trim() : null;
+
+/** Windows-1252 characters at 0x80–0x9F, by byte. */
+const CP1252_HIGH: Record<string, number> = {
+  '€': 0x80,
+  '‚': 0x82,
+  ƒ: 0x83,
+  '„': 0x84,
+  '…': 0x85,
+  '†': 0x86,
+  '‡': 0x87,
+  ˆ: 0x88,
+  '‰': 0x89,
+  Š: 0x8a,
+  '‹': 0x8b,
+  Œ: 0x8c,
+  Ž: 0x8e,
+  '‘': 0x91,
+  '’': 0x92,
+  '“': 0x93,
+  '”': 0x94,
+  '•': 0x95,
+  '–': 0x96,
+  '—': 0x97,
+  '˜': 0x98,
+  '™': 0x99,
+  š: 0x9a,
+  '›': 0x9b,
+  œ: 0x9c,
+  ž: 0x9e,
+  Ÿ: 0x9f,
+};
+const MOJIBAKE = /[ÃÂâ][\u0080-¿ŒœŠšŸŽžƒˆ˜–-›€™]/;
+const utf8 = new TextDecoder('utf-8', { fatal: true });
+
+/**
+ * Undoes UTF-8 text that was decoded as Windows-1252 (`PÃ¢tisserie` →
+ * `Pâtisserie`, `bearâ€™s` → `bear’s`), as the shop stores some titles.
+ * Text without that pattern, or that does not decode cleanly, is returned
+ * unchanged.
+ */
+export function repairMojibake(text: string): string {
+  if (!MOJIBAKE.test(text)) return text;
+  const bytes: number[] = [];
+  for (const ch of text) {
+    const code = ch.codePointAt(0)!;
+    // `à` is C3 A0; the A0 (no-break space) often reached the shop as a plain space.
+    const nbsp = ch === ' ' && bytes[bytes.length - 1] === 0xc3;
+    const byte = nbsp ? 0xa0 : code <= 0xff ? code : CP1252_HIGH[ch];
+    if (byte === undefined) return text;
+    bytes.push(byte);
+  }
+  try {
+    return utf8.decode(Uint8Array.from(bytes));
+  } catch {
+    return text;
+  }
+}

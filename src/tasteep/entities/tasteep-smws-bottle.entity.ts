@@ -18,32 +18,59 @@ const numericTransformer = {
     value === null || value === undefined ? null : parseFloat(value),
 };
 
+export const SMWS_BOTTLE_KINDS = ['single_cask', 'blend', 'other'] as const;
 /**
- * One SMWS bottling as seen on smws.eu, kept for good: a bottle that leaves
- * the shop is flagged (`delisted_at`), never deleted, so the rows where
- * `delisted_at IS NOT NULL` are our own archive.
- *
- * Identity is the full SMWS code (`1.234`). The listing pages only give a
- * product URL, so the scraper matches listed bottles on the normalized `url`
- * and reads the code from the detail page the first time it sees that URL.
- *
- * Availability is decided by `SmwsBottleSyncService` (see `planSync`), never
- * by a single scrape: a bottle is delisted only after missing several
- * trusted runs in a row.
+ * - `single_cask` — one SMWS cask code (`1.309`, `RW6.5`)
+ * - `blend` — a whisky without a single cask code: small batches, blended
+ *   malts, `SM` codes (`Batch 40`, `Distillery 68 Rare Release`)
+ * - `other` — anything else with an ABV: tasting packs, gift sets, two-cask
+ *   duos, gin, rum, beer
  */
-@Entity('tasteep_smws_bottles')
-@Index('tasteep_smws_bottles_url_idx', ['url'])
-@Index('tasteep_smws_bottles_distillery_code_idx', ['distilleryCode'])
-@Index('tasteep_smws_bottles_region_idx', ['regionId'])
-@Index('tasteep_smws_bottles_delisted_at_idx', ['delistedAt'])
-export class TasteepSmwsBottle {
-  /** Full SMWS code, e.g. `1.234`, `G1.12`. */
-  @PrimaryColumn({ type: 'text' })
-  code: string;
+export type SmwsBottleKind = (typeof SMWS_BOTTLE_KINDS)[number];
 
-  /** Code prefix (`1`, `G1`), the key of `tasteep_smws_codes`. */
-  @Column({ name: 'distillery_code', type: 'text' })
-  distilleryCode: string;
+/**
+ * One SMWS bottle sold on smws.eu, kept for good: a bottle that sells out
+ * stays with `in_stock = false`, so the out-of-stock rows are our archive.
+ *
+ * Identity is the shop's SKU, which every product has (blends have no cask
+ * code). Filled by `SmwsBottleSyncService` from plain-HTTP reads of each
+ * product page: availability comes from the page's own stock flag, and a
+ * read that lacks a field never erases a value already stored.
+ *
+ * Table `tasteep_smws_catalog` (the Playwright-era `tasteep_smws_bottles`
+ * is left in place for comparison until it is dropped).
+ */
+@Entity('tasteep_smws_catalog')
+@Index('tasteep_smws_catalog_code_key', ['code'], {
+  unique: true,
+  where: '"code" IS NOT NULL',
+})
+@Index('tasteep_smws_catalog_url_idx', ['url'])
+@Index('tasteep_smws_catalog_distillery_code_idx', ['distilleryCode'])
+@Index('tasteep_smws_catalog_region_idx', ['regionId'])
+@Index('tasteep_smws_catalog_in_stock_idx', ['inStock'])
+export class TasteepSmwsBottle {
+  @PrimaryColumn({ type: 'text' })
+  sku: string;
+
+  /** The shop's product id. */
+  @Column({ name: 'product_id', type: 'integer', nullable: true })
+  productId: number | null;
+
+  /** Normalized product URL (absolute, no query, no trailing slash). */
+  @Column({ type: 'text' })
+  url: string;
+
+  @Column({ type: 'text' })
+  kind: SmwsBottleKind;
+
+  /** Full SMWS cask code (`1.309`, `RW6.5`); `null` for blends. */
+  @Column({ type: 'text', nullable: true })
+  code: string | null;
+
+  /** Code prefix (`1`, `RW6`), the key of `tasteep_smws_codes`; `null` for blends. */
+  @Column({ name: 'distillery_code', type: 'text', nullable: true })
+  distilleryCode: string | null;
 
   /**
    * The distillery behind the code. No FK constraint: SMWS can list a code
@@ -56,18 +83,18 @@ export class TasteepSmwsBottle {
   @JoinColumn({ name: 'distillery_code', referencedColumnName: 'code' })
   smwsCode: TasteepSmwsCode | null;
 
-  /** Part after the dot. */
-  @Column({ name: 'cask_no', type: 'text' })
-  caskNo: string;
+  /** Part after the dot of the code. */
+  @Column({ name: 'cask_no', type: 'text', nullable: true })
+  caskNo: string | null;
+
+  /** Blend batch as displayed, e.g. `Batch 40`. */
+  @Column({ type: 'text', nullable: true })
+  batch: string | null;
 
   @Column({ type: 'text' })
   name: string;
 
-  /** Normalized product URL (absolute, no query, no trailing slash). */
-  @Column({ type: 'text' })
-  url: string;
-
-  /** Price exactly as displayed, e.g. `€95.00`. */
+  /** Price exactly as displayed, e.g. `€140.00`. */
   @Column({ name: 'price_text', type: 'text', nullable: true })
   priceText: string | null;
 
@@ -81,7 +108,7 @@ export class TasteepSmwsBottle {
   })
   priceAmount: number | null;
 
-  /** ISO 4217 (`EUR`, `GBP`) when the symbol was recognized. */
+  /** ISO 4217, e.g. `EUR`. */
   @Column({ name: 'price_currency', type: 'text', nullable: true })
   priceCurrency: string | null;
 
@@ -95,6 +122,7 @@ export class TasteepSmwsBottle {
   })
   abv: number | null;
 
+  /** As displayed, e.g. `14 years`. */
   @Column({ type: 'text', nullable: true })
   age: string | null;
 
@@ -105,7 +133,7 @@ export class TasteepSmwsBottle {
   @Column({ name: 'distilled_date', type: 'date', nullable: true })
   distilledDate: string | null;
 
-  /** SMWS flavour profile, e.g. `Juicy, oak & vanilla`. */
+  /** SMWS flavour profile, e.g. `Dried Fruits & Spices`. */
   @Column({ type: 'text', nullable: true })
   profile: string | null;
 
@@ -124,20 +152,32 @@ export class TasteepSmwsBottle {
   @Column({ name: 'region_id', type: 'text', nullable: true })
   regionId: string | null;
 
+  /** The shop's category paths, as given (`All Whisky/Cask Type/Sherry Casks`…). */
+  @Column({ type: 'text', array: true, default: '{}' })
+  categories: string[];
+
+  /** The shop's `Release Date`, read as UTC (the shop gives no time zone). */
+  @Column({ name: 'released_at', type: 'timestamptz', nullable: true })
+  releasedAt: Date | null;
+
+  /** From the page's own stock flag at the last successful read. */
+  @Column({ name: 'in_stock', type: 'boolean' })
+  inStock: boolean;
+
+  /** Units left at the last read, when the shop shows it. */
+  @Column({ type: 'integer', nullable: true })
+  stock: number | null;
+
   @Column({ name: 'first_seen_at', type: 'timestamptz' })
   firstSeenAt: Date;
 
-  /** Last trusted or untrusted run that listed it. */
+  /** Last successful read of the page. */
   @Column({ name: 'last_seen_at', type: 'timestamptz' })
   lastSeenAt: Date;
 
-  /** Set once the bottle missed enough trusted runs in a row; cleared if it comes back. */
+  /** When we saw it go out of stock; `null` if in stock or never seen in stock. */
   @Column({ name: 'delisted_at', type: 'timestamptz', nullable: true })
   delistedAt: Date | null;
-
-  /** Trusted runs in a row that did not list it. Reset to 0 whenever it is listed. */
-  @Column({ name: 'consecutive_misses', type: 'smallint', default: 0 })
-  consecutiveMisses: number;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;

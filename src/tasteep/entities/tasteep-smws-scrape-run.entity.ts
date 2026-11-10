@@ -5,10 +5,10 @@ export type ScrapeRunTrigger = (typeof SCRAPE_RUN_TRIGGERS)[number];
 
 /**
  * - `running`   — in progress (or the process died; fixed up at the next boot)
- * - `succeeded` — listing trusted, availability fully applied
- * - `partial`   — listing not trusted (incomplete or suspiciously short):
- *                 seen bottles and new ones were saved, nothing was delisted
- * - `failed`    — threw before writing anything
+ * - `succeeded` — every step ran and every page read worked
+ * - `partial`   — the run finished but the sitemap or some page reads failed;
+ *                 those pages are retried next run and nothing was changed for them
+ * - `failed`    — threw before finishing
  */
 export const SCRAPE_RUN_STATUSES = [
   'running',
@@ -18,7 +18,11 @@ export const SCRAPE_RUN_STATUSES = [
 ] as const;
 export type ScrapeRunStatus = (typeof SCRAPE_RUN_STATUSES)[number];
 
-/** One scraper run, kept as a log so availability changes can be explained after the fact. */
+/**
+ * One scraper run, kept as a log so availability changes can be explained
+ * after the fact. Columns from the Playwright era (`pages`, `listed`,
+ * `missed`, `confirmed`) stay nullable for the old rows.
+ */
 @Entity('tasteep_smws_scrape_runs')
 @Index('tasteep_smws_scrape_runs_started_at_idx', ['startedAt'])
 export class TasteepSmwsScrapeRun {
@@ -37,33 +41,46 @@ export class TasteepSmwsScrapeRun {
   @Column({ name: 'finished_at', type: 'timestamptz', nullable: true })
   finishedAt: Date | null;
 
-  /** Listing pages read. */
-  @Column({ type: 'integer', nullable: true })
-  pages: number | null;
+  /** Product URLs in the sitemap. */
+  @Column({ name: 'sitemap_urls', type: 'integer', nullable: true })
+  sitemapUrls: number | null;
 
-  /** Distinct product URLs on the listing. */
+  /** Never-seen URLs read this run. */
   @Column({ type: 'integer', nullable: true })
-  listed: number | null;
+  discovered: number | null;
 
   /** Bottles saved for the first time. */
   @Column({ type: 'integer', nullable: true })
   added: number | null;
 
-  /** Delisted bottles listed again. */
+  /** Known bottles re-read for stock and price (in stock, or recently sold out). */
+  @Column({ type: 'integer', nullable: true })
+  checked: number | null;
+
+  /** Out-of-stock bottles back in stock. */
   @Column({ type: 'integer', nullable: true })
   relisted: number | null;
 
-  /** Available bottles missing from a trusted listing (counted, not yet delisted). */
+  /** In-stock bottles now out of stock (or whose page is gone). */
+  @Column({ type: 'integer', nullable: true })
+  delisted: number | null;
+
+  /** Page reads that failed; retried next run. */
+  @Column({ type: 'integer', nullable: true })
+  failed: number | null;
+
+  // --- Playwright era, kept for old rows -----------------------------------
+  @Column({ type: 'integer', nullable: true })
+  pages: number | null;
+
+  @Column({ type: 'integer', nullable: true })
+  listed: number | null;
+
   @Column({ type: 'integer', nullable: true })
   missed: number | null;
 
-  /** Bottles missing from the listing but confirmed in stock on their own page (no miss counted). */
   @Column({ type: 'integer', nullable: true })
   confirmed: number | null;
-
-  /** Bottles that reached the miss threshold this run, or were confirmed out of stock. */
-  @Column({ type: 'integer', nullable: true })
-  delisted: number | null;
 
   /** Why a run is `partial`, or other remarks. */
   @Column({ type: 'text', nullable: true })
