@@ -2,6 +2,7 @@ import { createMockRepository } from '../../test-utils/mock-repository.factory';
 import { TasteepSmwsBottle } from '../entities/tasteep-smws-bottle.entity';
 import { smwsProductPage } from '../test-utils/smws-page.fixture';
 import { SmwsBottleSyncService } from './smws-bottle-sync.service';
+import { CATALOG_RULES_VERSION } from './smws-catalog.rules';
 import type { PageResponse } from './smws-http.client';
 
 const url = (slug: string) => `https://smws.eu/${slug}`;
@@ -306,6 +307,43 @@ describe('SmwsBottleSyncService', () => {
         expect.objectContaining({ inStock: false, delistedAt: anyDate }),
       );
       expect(run?.delisted).toBe(1);
+    });
+  });
+
+  describe('rules upgrades', () => {
+    it('re-reads bottle pages read under older rules and records the new version', async () => {
+      pages
+        .find!.mockResolvedValueOnce([]) // known URLs
+        .mockResolvedValueOnce([]) // `other` pages due for a recheck
+        .mockResolvedValueOnce([{ url: url('barrelbutt') }]); // older rules
+      bottles.findOne!.mockResolvedValue(
+        storedBarrelbutt({ name: 'PÃ¢tisserie', inStock: false }),
+      );
+      http.get.mockResolvedValue(
+        ok(smwsProductPage({ title: 'PÃ¢tisserie', inStock: false })),
+      );
+
+      const run = await service.run('cron');
+
+      expect(pages.find).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            kind: 'bottle',
+            rulesVersion: expect.anything() as unknown,
+          }) as unknown,
+        }),
+      );
+      expect(http.get).toHaveBeenCalledWith(url('barrelbutt'));
+      expect(saved[0]).toEqual(expect.objectContaining({ name: 'Pâtisserie' }));
+      expect(pageWrites[0]).toEqual(
+        expect.objectContaining({
+          kind: 'bottle',
+          rulesVersion: CATALOG_RULES_VERSION,
+        }),
+      );
+      expect(run).toEqual(
+        expect.objectContaining({ status: 'succeeded', checked: 1 }),
+      );
     });
   });
 

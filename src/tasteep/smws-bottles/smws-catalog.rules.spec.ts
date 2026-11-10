@@ -1,6 +1,7 @@
 import { smwsProductPage } from '../test-utils/smws-page.fixture';
 import {
   BottleRead,
+  codeFromSku,
   mergeBottle,
   parseReleaseDate,
   profileFromCategories,
@@ -21,6 +22,7 @@ describe('readBottle', () => {
       productId: 6130,
       url: URL,
       kind: 'single_cask',
+      kindFromCode: true,
       code: '1.309',
       distilleryCode: '1',
       caskNo: '309',
@@ -146,6 +148,115 @@ describe('readBottle', () => {
     expect(bottle.code).toBe('1.309');
   });
 
+  it('repairs double-encoded titles and fields', () => {
+    const bottle = read(
+      smwsProductPage({
+        title: 'PÃ¢tisserie au jardin',
+        info: { ABV: '56%', CASK: 'CrÃ¨me brÃ»lÃ©e cask' },
+      }),
+    )!;
+    expect(bottle.name).toBe('Pâtisserie au jardin');
+    expect(bottle.caskType).toBe('Crème brûlée cask');
+    expect(read(smwsProductPage({ title: 'A dÃ© jÃ -vu' }))!.name).toBe(
+      'A dé jà-vu',
+    );
+    expect(
+      read(smwsProductPage({ title: 'Touched by a bearâ€™s paw' }))!.name,
+    ).toBe('Touched by a bear’s paw');
+  });
+
+  it('reads an ABV given as a fraction', () => {
+    expect(read(smwsProductPage({ info: { ABV: '0.556%' } }))!.abv).toBe(55.6);
+  });
+
+  it('drops a €0.00 price', () => {
+    const bottle = read(
+      smwsProductPage({
+        price: { formatted: '€0.00', value: 0, currency: 'EUR' },
+      }),
+    )!;
+    expect([
+      bottle.priceText,
+      bottle.priceAmount,
+      bottle.priceCurrency,
+    ]).toEqual([null, null, null]);
+  });
+
+  describe('kind', () => {
+    const page = (custom: Record<string, string>, extra = {}) =>
+      read(
+        smwsProductPage({
+          caskNo: '',
+          info: { ABV: '50%', AGE: custom.Age ? `${custom.Age} years` : '' },
+          custom: { ABV: '50%', ...custom },
+          ...extra,
+        }),
+      )!;
+
+    it('makes an SM code a blend, with the code as its batch', () => {
+      expect(page({ 'Whisky Cask Code': 'SM0.001', Age: '7' })).toEqual(
+        expect.objectContaining({
+          kind: 'blend',
+          kindFromCode: true,
+          code: null,
+          distilleryCode: null,
+          batch: 'SM0.001',
+        }),
+      );
+    });
+
+    it('makes two casks in one product `other`', () => {
+      const duo = page({ 'Whisky Cask Code': '24.182 & 19.102', Age: '16' });
+      expect([duo.kind, duo.code, duo.kindFromCode]).toEqual([
+        'other',
+        null,
+        true,
+      ]);
+      expect(
+        read(smwsProductPage({ info: { ABV: '56%', AGE: '16 & 21 years' } }))!
+          .kind,
+      ).toBe('other');
+    });
+
+    it('keeps a blend label as written', () => {
+      expect(
+        page({ 'Whisky Cask Code': 'Distillery 68 Rare Release', Age: '14' })
+          .batch,
+      ).toBe('Distillery 68 Rare Release');
+      expect(page({ 'Society Code': 'batch 42', Age: '10' }).batch).toBe(
+        'Batch 42',
+      );
+    });
+
+    it('tells blends from packs and other spirits without a code', () => {
+      const kind = (custom: Record<string, string>) =>
+        page(custom, { sku: 'PACK-01' }).kind;
+      expect(kind({ 'Spirit Type': 'Malt Whisky', Age: '12' })).toBe('blend');
+      expect(kind({ 'Spirit Type': 'Blended Malt' })).toBe('blend');
+      expect(kind({ Age: '14' })).toBe('blend');
+      expect(kind({ 'Spirit Type': 'Malt Whisky' })).toBe('other'); // tasting pack
+      expect(kind({})).toBe('other'); // beer, sherry pair
+      expect(kind({ 'Spirit Type': 'Gin' })).toBe('other');
+      expect(kind({ 'Spirit Type': 'Jamaican Rum', Age: '8' })).toBe('other');
+    });
+
+    it('takes a single cask code from the SKU when the page shows none', () => {
+      expect(
+        page(
+          { 'Spirit Type': 'Malt Whisky', Age: '10' },
+          { sku: '005138EU0700610' },
+        ),
+      ).toEqual(
+        expect.objectContaining({
+          kind: 'single_cask',
+          kindFromCode: false,
+          code: '5.138',
+          distilleryCode: '5',
+        }),
+      );
+    });
+  });
+
   it('is null for a product without an ABV (not a drink)', () => {
     expect(
       read(
@@ -171,6 +282,7 @@ describe('mergeBottle', () => {
     productId: null,
     url: URL,
     kind: 'blend',
+    kindFromCode: false,
     code: null,
     distilleryCode: null,
     caskNo: null,
@@ -253,6 +365,45 @@ describe('mergeBottle', () => {
     ).toBe(true);
   });
 
+  it('reclassifies on a read that shows the kind in its code', () => {
+    const merged = mergeBottle(
+      stored,
+      { ...emptyRead, kind: 'blend', kindFromCode: true, batch: 'SM0.001' },
+      null,
+    );
+    expect(merged).toEqual(
+      expect.objectContaining({
+        kind: 'blend',
+        code: null,
+        distilleryCode: null,
+        caskNo: null,
+        batch: 'SM0.001',
+      }),
+    );
+  });
+
+  it('fixes stored values a better read corrects', () => {
+    const merged = mergeBottle(
+      { ...stored, name: 'PÃ¢tisserie', abv: 0.6 },
+      read(smwsProductPage({ title: 'PÃ¢tisserie', info: { ABV: '0.556%' } }))!,
+      null,
+    );
+    expect([merged.name, merged.abv]).toEqual(['Pâtisserie', 55.6]);
+  });
+
+  it('drops a stored €0.00 price', () => {
+    const merged = mergeBottle(
+      { ...stored, priceText: '€0.00', priceAmount: 0 },
+      emptyRead,
+      null,
+    );
+    expect([
+      merged.priceText,
+      merged.priceAmount,
+      merged.priceCurrency,
+    ]).toEqual([null, null, null]);
+  });
+
   it('uses the SKU it already has when matched by code', () => {
     const merged = mergeBottle(
       stored,
@@ -276,6 +427,22 @@ describe('stockChange', () => {
         inStock: after,
       }),
     ).toBe(expected);
+  });
+});
+
+describe('codeFromSku', () => {
+  it.each([
+    ['001309GX0700614', '1.309'],
+    ['121118EU0700609', '121.118'],
+    ['0G8022GX0700632', 'G8.22'],
+    ['RW6005GX0700608', 'RW6.5'],
+    ['SM0120EU0700610', null],
+    ['BAT010GX0700610', null],
+    ['GX0745125960654', null],
+    ['PITCHBLACK-BEER-3PACK', null],
+    [null, null],
+  ])('%s → %s', (sku, expected) => {
+    expect(codeFromSku(sku)).toBe(expected);
   });
 });
 

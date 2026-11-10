@@ -134,10 +134,23 @@ uses public pages: the product sitemap (`/xmlsitemap.php`) and the product pages
    `in_stock = false` and `delisted_at`; back in stock clears them.
 3. **Relist sweep:** bottles sold out in the last 30 days are re-read weekly.
 4. Pages read as `other` are re-read monthly.
+5. **Rules upgrades:** bottle pages read under an older `CATALOG_RULES_VERSION`
+   (`smws-catalog.rules.ts`) are read again, so a parsing fix reaches the whole archive. Bump
+   the version with any rules change that should apply to stored bottles; the next run then
+   re-reads every bottle page once (about 2 hours).
 
-Bottles are keyed by the shop's **SKU**, so blends without a cask code (`kind = blend`, e.g.
-Fruit Bomb, `batch = "Batch 40"`) are stored next to single casks (`kind = single_cask`,
-`code = 1.309`). Each field is read from the visible info list first (same format as before),
+Bottles are keyed by the shop's **SKU**, in three kinds:
+
+- `single_cask`: one SMWS cask code (`code = 1.309`). When a page shows no code, it is decoded
+  from the SKU (`005138EU…` → `5.138`).
+- `blend`: whisky without a single cask code. `batch` holds the label it is sold under
+  (`Batch 40`, `Distillery 68 Rare Release`, `BAT.14`), including `SM` codes (`SM0.001`).
+- `other`: everything else with an ABV, such as tasting packs, gift sets, two-cask duos, gin,
+  rum and beer.
+
+The shop stores some titles double-encoded (`PÃ¢tisserie`); text fields are repaired on read.
+An ABV given as a fraction (`0.556%`) is read as 55.6%, and a €0.00 price is stored as no
+price. Each field is read from the visible info list first (same format as before),
 then from the shop's `custom_fields`; profile comes from the product's categories, price and
 stock from the shop's JSON. A read that lacks a field never erases a stored value, and
 categories accumulate. Bottles are never deleted: sold-out rows are our archive. Each single

@@ -5,13 +5,13 @@ import { TasteepSmwsScrapeRun } from '../entities/tasteep-smws-scrape-run.entity
 export interface SmwsBottleJson {
   /** The shop's SKU: the bottle's stable id. */
   sku: string;
-  /** `single_cask` or `blend`. */
+  /** `single_cask`, `blend` or `other` (packs, gift sets, gin, rum, beer). */
   kind: string;
-  /** `1.309`; `null` for blends. */
+  /** `1.309`; `null` unless `single_cask`. */
   code: string | null;
   distillery_code: string | null;
   cask_no: string | null;
-  /** Blends: `Batch 40`. */
+  /** Blends: `Batch 40`, `Distillery 68 Rare Release`, `SM0.001`. */
   batch: string | null;
   name: string;
   url: string;

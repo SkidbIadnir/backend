@@ -134,6 +134,8 @@ export class SmwsBottleCounts {
   delisted: number;
   single_casks: number;
   blends: number;
+  /** Tasting packs, gift sets, gin, rum, beer… */
+  others: number;
   without_region: number;
   /** Single casks whose code prefix is missing from `tasteep_smws_codes`. */
   unknown_distillery: number;

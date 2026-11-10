@@ -202,7 +202,7 @@ subregions (empty list when the country is the only sensible choice).
 
 ## SMWS bottles
 
-SMWS bottles sold on smws.eu, single casks and blends, refreshed nightly. Shared reference
+SMWS bottles sold on smws.eu (single casks, blends and other products such as packs), refreshed nightly. Shared reference
 data: every signed-in user gets the same list. A bottle that sells out is never deleted, only
 flagged (`available: false`), so the sold-out ones are the archive.
 
@@ -211,7 +211,7 @@ flagged (`available: false`), so the sold-out ones are the archive.
 | Query | Default | Meaning |
 |---|---|---|
 | `status` | `available` | `available`, `delisted` (sold out) or `all` |
-| `kind` | | `single_cask` or `blend` |
+| `kind` | | `single_cask`, `blend` or `other` |
 | `distillery_code` | | code prefix, e.g. `1`, `G1` (case-insensitive) |
 | `region_id` | | id from `GET /tasteep/regions`; a country also matches its subregions |
 | `limit` / `offset` | `50` / `0` | `limit` ≤ 200 |
@@ -240,7 +240,9 @@ Newest release first (`released_at`); with `status=delisted`, most recently sold
 ```
 
 A blend has `kind: "blend"`, `code`/`distillery_code`/`cask_no`/`distillery_name` `null` and
-`batch` set, e.g. `"batch": "Batch 40"` for Fruit Bomb.
+usually `batch` set, the label it is sold under: `"Batch 40"` for Fruit Bomb,
+`"Distillery 68 Rare Release"`, `"SM0.001"`. `kind: "other"` covers tasting packs, gift sets,
+two-cask duos, gin, rum and beer; it has no `code` either.
 
 - `sku` is the stable id. `code` is unique when set.
 - `distillery_code` is the key of `GET /tasteep/smws-codes`; `distillery_name`/`category`

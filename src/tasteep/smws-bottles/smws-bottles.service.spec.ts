@@ -46,9 +46,10 @@ describe('SmwsBottlesService', () => {
 
   beforeEach(() => {
     qb = createMockQueryBuilder({
-      total: '3',
+      total: '4',
       available: '2',
       single_casks: '2',
+      blends: '1',
       without_region: '1',
       unknown_distillery: '0',
       last_seen_at: new Date('2026-11-09T00:00:00Z'),
@@ -159,11 +160,12 @@ describe('SmwsBottlesService', () => {
   it('builds the admin status', async () => {
     const status = await service.adminStatus();
     expect(status.bottles).toEqual({
-      total: 3,
+      total: 4,
       available: 2,
-      delisted: 1,
+      delisted: 2,
       single_casks: 2,
       blends: 1,
+      others: 1,
       without_region: 1,
       unknown_distillery: 0,
       last_seen_at: '2026-11-09T00:00:00.000Z',

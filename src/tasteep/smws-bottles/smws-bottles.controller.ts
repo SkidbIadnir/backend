@@ -6,7 +6,7 @@ import { SmwsBottlesService } from './smws-bottles.service';
  * SMWS bottles seen on smws.eu, current and past. Shared reference data (not
  * per user), so any signed-in user reads the same list.
  *
- * `GET /tasteep/smws-bottles?status=available|delisted|all&kind=single_cask|blend&distillery_code=&region_id=&limit=&offset=`
+ * `GET /tasteep/smws-bottles?status=available|delisted|all&kind=single_cask|blend|other&distillery_code=&region_id=&limit=&offset=`
  * → `{ total, items }`. `GET /tasteep/smws-bottles/:id` (cask code or SKU) → one bottle.
  */
 @Controller('tasteep/smws-bottles')

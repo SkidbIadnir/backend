@@ -14,6 +14,7 @@ import {
 import { RegionsService } from '../regions/regions.service';
 import {
   BottleRead,
+  CATALOG_RULES_VERSION,
   mergeBottle,
   readBottle,
   StoredBottle,
@@ -54,7 +55,9 @@ const errorMessage = (e: unknown) =>
  *     and any newly filled field;
  *  3. relist sweep — bottles sold out in the last 30 days are re-read
  *     weekly in case they come back;
- *  4. pages read as `other` (no ABV) are re-read monthly.
+ *  4. pages read as `other` (no ABV) are re-read monthly;
+ *  5. bottle pages read under older rules (`CATALOG_RULES_VERSION`) are read
+ *     again, so a rules fix reaches the archive too.
  * Availability is the page's own stock flag. Each page is written as soon as
  * it is read, so an interrupted run (the first one reads ~2,500 pages) resumes
  * where it stopped. A failed read changes nothing and is retried next run.
@@ -242,6 +245,30 @@ export class SmwsBottleSyncService implements OnModuleInit {
         await this.readAndStore(url, 'discover', counters, cache);
       }
 
+      // 5. Bottle pages read under older rules.
+      const stale = await this.pages.find({
+        select: { url: true },
+        where: {
+          kind: 'bottle',
+          rulesVersion: LessThan(CATALOG_RULES_VERSION),
+          lastReadAt: LessThan(run.startedAt),
+        },
+      });
+      if (stale.length) {
+        this.logger.log(
+          `Scrape #${run.id}: re-reading ${stale.length} page(s) read under older rules.`,
+        );
+      }
+      for (const [i, { url }] of stale.entries()) {
+        counters.checked++;
+        await this.readAndStore(url, 'check', counters, cache);
+        if ((i + 1) % 100 === 0) {
+          this.logger.log(
+            `Scrape #${run.id}: ${i + 1}/${stale.length} older page(s) re-read, ${counters.failed} failed.`,
+          );
+        }
+      }
+
       if (counters.failed) {
         notes.push(`${counters.failed} page read(s) failed; retried next run.`);
       }
@@ -381,8 +408,15 @@ export class SmwsBottleSyncService implements OnModuleInit {
     await repo
       .createQueryBuilder()
       .insert()
-      .values({ url, kind, sku, firstReadAt: now, lastReadAt: now })
-      .orUpdate(['kind', 'sku', 'last_read_at'], ['url'])
+      .values({
+        url,
+        kind,
+        sku,
+        rulesVersion: CATALOG_RULES_VERSION,
+        firstReadAt: now,
+        lastReadAt: now,
+      })
+      .orUpdate(['kind', 'sku', 'rules_version', 'last_read_at'], ['url'])
       .execute();
   }
 }

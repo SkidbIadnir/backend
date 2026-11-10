@@ -27,6 +27,10 @@ export class TasteepSmwsPage {
   @Column({ type: 'text', nullable: true })
   sku: string | null;
 
+  /** `CATALOG_RULES_VERSION` of the last read; older bottle pages are read again. */
+  @Column({ name: 'rules_version', type: 'int', default: 0 })
+  rulesVersion: number;
+
   @Column({ name: 'first_read_at', type: 'timestamptz' })
   firstReadAt: Date;
 

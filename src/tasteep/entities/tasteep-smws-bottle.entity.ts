@@ -18,8 +18,14 @@ const numericTransformer = {
     value === null || value === undefined ? null : parseFloat(value),
 };
 
-export const SMWS_BOTTLE_KINDS = ['single_cask', 'blend'] as const;
-/** `single_cask`: has an SMWS cask code (`1.309`). `blend`: anything else with an ABV (`Batch 40`, vattings). */
+export const SMWS_BOTTLE_KINDS = ['single_cask', 'blend', 'other'] as const;
+/**
+ * - `single_cask` — one SMWS cask code (`1.309`, `RW6.5`)
+ * - `blend` — a whisky without a single cask code: small batches, blended
+ *   malts, `SM` codes (`Batch 40`, `Distillery 68 Rare Release`)
+ * - `other` — anything else with an ABV: tasting packs, gift sets, two-cask
+ *   duos, gin, rum, beer
+ */
 export type SmwsBottleKind = (typeof SMWS_BOTTLE_KINDS)[number];
 
 /**

@@ -60,6 +60,8 @@ export interface SmwsAdminStatus {
     delisted: number;
     single_casks: number;
     blends: number;
+    /** Tasting packs, gift sets, gin, rum, beer… */
+    others: number;
     without_region: number;
     /** Single casks whose code prefix is missing from `tasteep_smws_codes`. */
     unknown_distillery: number;
@@ -74,6 +76,7 @@ type CountsRow = {
   total: string;
   available: string;
   single_casks: string;
+  blends: string;
   without_region: string;
   unknown_distillery: string;
   last_seen_at: Date | null;
@@ -93,7 +96,7 @@ export class SmwsBottlesService {
   ) {}
 
   /**
-   * `status` (default `available`), `kind` (`single_cask`, `blend`),
+   * `status` (default `available`), `kind` (`single_cask`, `blend`, `other`),
    * `distillery_code` (`1`, `G1`), `region_id` (a country also matches its
    * subregions), `limit` (≤ 200), `offset`. Newest release first; sold-out
    * bottles most recently sold out first.
@@ -175,6 +178,7 @@ export class SmwsBottlesService {
           "COUNT(*) FILTER (WHERE b.kind = 'single_cask')",
           'single_casks',
         )
+        .addSelect("COUNT(*) FILTER (WHERE b.kind = 'blend')", 'blends')
         .addSelect(
           'COUNT(*) FILTER (WHERE b.region_id IS NULL)',
           'without_region',
@@ -206,7 +210,8 @@ export class SmwsBottlesService {
         available,
         delisted: total - available,
         single_casks: singleCasks,
-        blends: total - singleCasks,
+        blends: Number(counts.blends),
+        others: total - singleCasks - Number(counts.blends),
         without_region: Number(counts.without_region),
         unknown_distillery: Number(counts.unknown_distillery),
         last_seen_at: counts.last_seen_at
