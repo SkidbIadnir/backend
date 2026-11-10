@@ -32,6 +32,15 @@ export class TastingsController {
     return this.tastings.list(req.user.sub, { unplaced: isTruthy(unplaced) });
   }
 
+  /**
+   * Starts a tasting from a catalog bottle: `:bottle` is a cask code (`1.309`)
+   * or SKU. Declared before `:id` so `prefill` is not read as a tasting id.
+   */
+  @Get('prefill/:bottle')
+  prefill(@Req() req: TasteepAuthRequest, @Param('bottle') bottle: string) {
+    return this.tastings.prefill(req.user.sub, bottle);
+  }
+
   @Get(':id')
   get(@Req() req: TasteepAuthRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.tastings.get(req.user.sub, id);

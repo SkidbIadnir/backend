@@ -13,7 +13,13 @@ import {
 import { UpsertTastingDto } from './dto/upsert-tasting.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
 import { RegionsService } from '../regions/regions.service';
+import { SmwsBottlesService } from '../smws-bottles/smws-bottles.service';
 import { applyUpsertDto, TastingJson, toTastingJson } from './tasting.mapper';
+import {
+  codeInName,
+  TastingPrefillJson,
+  toTastingPrefill,
+} from './tasting-prefill';
 
 export interface TastingStats {
   count: number;
@@ -29,6 +35,7 @@ export class TastingsService {
     @InjectRepository(TasteepTasting)
     private readonly repo: Repository<TasteepTasting>,
     private readonly regions: RegionsService,
+    private readonly bottles: SmwsBottlesService,
   ) {}
 
   /** Newest `date_tasted` first; undated entries last. `unplaced` keeps only `unknown`/`country` precision. */
@@ -83,6 +90,7 @@ export class TastingsService {
         : null;
 
     applyUpsertDto(target, dto);
+    target.smwsSku = await this.bottleLink(dto, target);
 
     const region = await this.regions.resolve(dto.region_id, dto.region);
     target.regionId = region?.id ?? null;
@@ -96,6 +104,54 @@ export class TastingsService {
 
     await this.repo.save(target);
     return toTastingJson(await this.findOwned(userId, id));
+  }
+
+  /**
+   * A new tasting's fields from a catalog bottle (cask code or SKU), with the
+   * user's earlier tastings of it. `404` if the bottle is unknown.
+   */
+  async prefill(userId: string, bottle: string): Promise<TastingPrefillJson> {
+    const row = await this.bottles.findRow(bottle);
+    const previous = await this.repo.find({
+      where: { userId, smwsSku: row.sku },
+      order: {
+        dateTasted: { direction: 'DESC', nulls: 'LAST' },
+        createdAt: 'DESC',
+      },
+    });
+    return toTastingPrefill(
+      row,
+      previous.map((t) => ({
+        id: t.id,
+        name: t.name,
+        date_tasted: t.dateTasted ? new Date(t.dateTasted).toISOString() : null,
+        score: t.score ?? null,
+      })),
+    );
+  }
+
+  /**
+   * The bottle link to store: the body's `smws_sku` (a SKU or cask code,
+   * `400` if unknown), `null` to unlink; when the key is left out, the stored
+   * link, else the bottle whose cask code starts the name.
+   */
+  private async bottleLink(
+    dto: UpsertTastingDto,
+    target: TasteepTasting,
+  ): Promise<string | null> {
+    if (dto.smws_sku === null) return null;
+    if (dto.smws_sku !== undefined) {
+      const row = await this.bottles.findRowOrNull(dto.smws_sku);
+      if (!row) {
+        throw new BadRequestException(`Unknown smws_sku "${dto.smws_sku}".`);
+      }
+      return row.sku;
+    }
+    if (target.smwsSku) return target.smwsSku;
+    const code = codeInName(target.name);
+    return code
+      ? ((await this.bottles.findRowOrNull(code))?.sku ?? null)
+      : null;
   }
 
   async remove(userId: string, id: string): Promise<void> {

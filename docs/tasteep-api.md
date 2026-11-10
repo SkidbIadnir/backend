@@ -36,6 +36,7 @@ Exactly `lib/models/tasting.dart`. Every field except `id`, `name`, `category`, 
   "distillery": "Lagavulin",
   "region": "Islay",                     // free text, kept verbatim
   "region_id": "scotland/islay",         // link into GET /tasteep/regions, or null
+  "smws_sku": null,                      // SMWS bottle it is of (GET /tasteep/smws-bottles/:sku), or null
   "abv": 43,
   "price": 65.5,
   "age_statement": "16",
@@ -112,6 +113,7 @@ All scoped to the authenticated user; other users' rows are invisible (404).
 | `GET` | `/tasteep/tastings` | — | `200 Tasting[]`, newest `date_tasted` first, undated last |
 | `GET` | `/tasteep/tastings?unplaced=true` | — | Same, only `location_precision` in `unknown`, `country` (the "NOT PLACED" shelf) |
 | `GET` | `/tasteep/tastings/:id` | — | `200 Tasting` / `404` |
+| `GET` | `/tasteep/tastings/prefill/:bottle` | — | `200 TastingPrefill` / `404` (see [Adding a tasting from an SMWS bottle](#adding-a-tasting-from-an-smws-bottle)) |
 | `PUT` | `/tasteep/tastings/:id` | `Tasting` (see below) | `200 Tasting` |
 | `DELETE` | `/tasteep/tastings/:id` | — | `204` / `404` |
 | `PUT` | `/tasteep/tastings/:id/location` | `{"lat", "lon", "precision"}` | `200 Tasting` / `409` |
@@ -136,6 +138,14 @@ All scoped to the authenticated user; other users' rows are invisible (404).
     country (`"Islay"`, `"Islay, Scotland"` and `"Scotland / Speyside"` all link). A few
     aliases are known (`Highlands`, `Lowlands`, `USA`). No match → `region_id: null`,
     text untouched. Typing anything is always allowed.
+- **SMWS bottle.** `smws_sku` links the tasting to a catalog bottle. It is the one key that
+  does not follow full replacement:
+  - a SKU or cask code (`"29.311"`) → it must exist (`400 Unknown smws_sku "…"`); the SKU is
+    stored;
+  - `null` → unlinked;
+  - **key left out** → the stored link is kept, so an app version without the field does
+    not erase it. With no stored link, a name starting with a cask code
+    (`"29.311 Diesel à la crème"`, `"SMWS 1.309"`) links that bottle.
 
 ### `PUT /tasteep/tastings/:id/location`
 
@@ -206,17 +216,52 @@ SMWS bottles sold on smws.eu (single casks, blends and other products such as pa
 data: every signed-in user gets the same list. A bottle that sells out is never deleted, only
 flagged (`available: false`), so the sold-out ones are the archive.
 
-`GET /tasteep/smws-bottles` → `{"total": 312, "items": [SmwsBottle, …]}`
-
-| Query | Default | Meaning |
+| Method | Path | Response |
 |---|---|---|
-| `status` | `available` | `available`, `delisted` (sold out) or `all` |
-| `kind` | | `single_cask`, `blend` or `other` |
-| `distillery_code` | | code prefix, e.g. `1`, `G1` (case-insensitive) |
-| `region_id` | | id from `GET /tasteep/regions`; a country also matches its subregions |
-| `limit` / `offset` | `50` / `0` | `limit` ≤ 200 |
+| `GET` | `/tasteep/smws-bottles` | `{"total", "items": [SmwsBottle]}`: the shop's list, available bottles by default, newest release first |
+| `GET` | `/tasteep/smws-bottles/search` | `{"total", "items": [SmwsBottle]}`: every bottle ever seen, best match first; the bottle picker |
+| `GET` | `/tasteep/smws-bottles/facets` | `SmwsBottleFacets`: values for the filter sheet |
+| `GET` | `/tasteep/smws-bottles/:id` | `SmwsBottle` by cask code (`1.309`) or SKU / `404` |
 
-Newest release first (`released_at`); with `status=delisted`, most recently sold out first.
+The list and the search take the same query parameters and differ only in their defaults:
+
+| Query | List default | Search default | Meaning |
+|---|---|---|---|
+| `q` | | | Free text, see below |
+| `status` | `available` | `all` | `available`, `delisted` (sold out) or `all` |
+| `kind` | | | `single_cask`, `blend` or `other` |
+| `category` | | | distillery code category from `facets` (`single malt`, `rum`, `bourbon`, `gin`…); blends have none |
+| `distillery_code` | | | code prefix, e.g. `1`, `G1` (case-insensitive) |
+| `region_id` | | | id from `GET /tasteep/regions`; a country also matches its subregions |
+| `profile` | | | flavour profile, punctuation and case ignored (`deep rich dried fruits`) |
+| `cask` | | | words all found in the cask type (`oloroso`, `1st fill sherry`) |
+| `abv_min` / `abv_max` | | | percent |
+| `age_min` / `age_max` | | | years (bottles with a stated age only) |
+| `price_min` / `price_max` | | | last price seen, EUR |
+| `distilled_from` / `distilled_to` | | | year |
+| `released_from` / `released_to` | | | year |
+| `sort` | `released` | `relevance` with `q`, else `released` | `relevance`, `released`, `abv`, `age`, `price`, `distilled` |
+| `order` | `desc` | `desc` | `asc` or `desc`; bottles without the value come last either way |
+| `limit` / `offset` | `50` / `0` | `20` / `0` | `limit` ≤ 200 (list) or ≤ 100 (search) |
+
+Malformed values are `400`. Unknown parameters are ignored.
+
+**`q`, the free text**, accepts what someone holding a bottle would type:
+
+- **A cask code or its start**: `29.311`, `29.3`, `29.`, `g8.22`, `RW6.5`. Separators `,`,
+  `-` and a space work too (`29 311`, `29,311`), since phone keyboards differ. Matches codes
+  by prefix, shortest first: `5.1` lists 5.1, then 5.10–5.19, then 5.100…
+- **Anything else**: words, each found somewhere in the code, name, batch, distillery,
+  region, cask type, profile or age, ignoring case and accents (`menage` finds
+  `Ménage à mesquite`). `laphroaig oloroso`, `smoke peat`, `islay 12 years`. Ranking: the
+  distillery code itself when the text is one (`29`, `G1`), then names equal to, starting
+  with, or containing the text, then distillery names starting with it; newest release
+  first within each.
+
+No typo tolerance yet: `lafroaig` finds nothing.
+
+With `status=delisted` and the default sort, the list is ordered by sell-out date
+(most recently sold out first).
 `GET /tasteep/smws-bottles/:id` → one `SmwsBottle`, where `:id` is a cask code
 (`/tasteep/smws-bottles/1.309`) or a SKU; `404` if unknown.
 
@@ -255,6 +300,71 @@ two-cask duos, gin, rum and beer; it has no `code` either.
   first seen (most of the archive).
 - Every field after `name` and `url` may be `null`.
 
+`GET /tasteep/smws-bottles/facets`, counted over the whole catalog (example values):
+
+```json
+{
+  "kinds": [{"value": "single_cask", "count": 2224}, {"value": "blend", "count": 95}],
+  "categories": [{"value": "single malt", "count": 2068}, {"value": "rum", "count": 27}, …],
+  "profiles": [{"value": "Dried Fruits & Spices", "count": 55}, …],
+  "abv": {"min": 40.1, "max": 67.9},
+  "age": {"min": 1, "max": 40},
+  "price": {"min": 45, "max": 3480},
+  "distilled_years": {"min": 1982, "max": 2022},
+  "released_years": {"min": 2021, "max": 2026}
+}
+```
+
+Profile spelling variants are merged under the most common one. Only about 20% of
+bottles carry a profile, so a profile filter narrows a lot.
+
+### Adding a tasting from an SMWS bottle
+
+`GET /tasteep/tastings/prefill/:bottle` (`:bottle` = cask code or SKU) →
+
+```json
+{
+  "tasting": {
+    "name": "29.311 Diesel à la crème",
+    "category": "whisky",
+    "distillery": "Laphroaig",
+    "region": "Islay",
+    "region_id": "scotland/islay",
+    "abv": 58.4,
+    "price": 120,
+    "age_statement": "10",
+    "cask_type": "1st fill US oak ex-oloroso barrel",
+    "smws_sku": "029311GX0700612"
+  },
+  "bottle": { …SmwsBottle… },
+  "previous_tastings": [
+    {"id": "…", "name": "29.311 Diesel", "date_tasted": "2026-03-10T19:00:00.000Z", "score": 88}
+  ]
+}
+```
+
+- `tasting` holds `Tasting` fields with the same keys: copy them into the new-tasting form
+  and leave everything else (date, score, notes, location) to the user. A single cask is
+  named `<code> <name>`, as SMWS bottles are known; `age_statement` is the number of years
+  (`"14 years"` → `"14"`); `category` comes from the distillery code (`rum` → `rum`, `gin`,
+  `cognac`, `armagnac` → `other`) and is `whisky` for blends.
+- `price` is the shop's bottle price (EUR); a dram at a bar costs something else, so let
+  the user clear it.
+- `previous_tastings`: the user's own tastings of this bottle, newest first, for an
+  "already tasted, 88" hint.
+- `404` if the bottle is unknown.
+
+Suggested flow in the app:
+
+1. The picker calls `/search?q=…` as the user types: debounce ~250 ms, start at 1
+   character (a code like `1` or `29` is short), drop responses older than the latest
+   request. Show `code` (or `batch`), `name`, `distillery_name`, `age`, `abv` and a sold-out
+   badge from `available`; load the next page with `offset` on scroll.
+2. On a pick, call `/tasteep/tastings/prefill/:sku` and fill the form.
+3. Save with `PUT /tasteep/tastings/:id` as usual, keeping `smws_sku` in the body.
+4. Offline or nothing found: the user types freely. Starting the name with the cask code
+   still links the bottle when the tasting syncs.
+
 ---
 
 ## Geocoding
@@ -287,3 +397,6 @@ clients may call this freely; they should still store the result on the tasting 
    Fetch `GET /tasteep/regions` once per session for the picker; keep the free-text field
    so the user can still type anything. On the Atlas, draw a tasting with null `lat`/`lon`
    but a `region_id` at that region's centroid.
+6. **SMWS bottles.** `Tasting` gains `smws_sku` (nullable string; add it to `tasting.dart`
+   and send it back on every PUT). Add the bottle picker and prefill to the new-tasting
+   screen; see [Adding a tasting from an SMWS bottle](#adding-a-tasting-from-an-smws-bottle).

@@ -1,15 +1,7 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import {
-  SMWS_BOTTLE_KINDS,
-  SmwsBottleKind,
-  TasteepSmwsBottle,
-} from '../entities/tasteep-smws-bottle.entity';
+import { Repository, SelectQueryBuilder } from 'typeorm';
+import { TasteepSmwsBottle } from '../entities/tasteep-smws-bottle.entity';
 import { TasteepSmwsPage } from '../entities/tasteep-smws-page.entity';
 import { TasteepSmwsScrapeRun } from '../entities/tasteep-smws-scrape-run.entity';
 import {
@@ -20,36 +12,42 @@ import {
   toSmwsScrapeRunJson,
 } from './smws-bottle.mapper';
 import { SmwsBottleSyncService } from './smws-bottle-sync.service';
+import {
+  BottleSearch,
+  BottleSearchQuery,
+  FOLD_FROM,
+  FOLD_TO,
+  LIST_DEFAULTS,
+  likeEscape,
+  parseBottleSearch,
+  Range,
+  SEARCH_DEFAULTS,
+  SearchDefaults,
+} from './smws-bottle.search';
 
-export const BOTTLE_STATUSES = ['available', 'delisted', 'all'] as const;
-export type BottleStatus = (typeof BOTTLE_STATUSES)[number];
+/** SQL fold of `fold()`: lowercase, common accents removed. */
+const folded = (sql: string) => `translate(lower(${sql}), :foldFrom, :foldTo)`;
 
-export interface ListBottlesQuery {
-  status?: string;
-  kind?: string;
-  distillery_code?: string;
-  region_id?: string;
-  limit?: string;
-  offset?: string;
-}
+/** Everything the free text is looked up in. */
+const HAYSTACK = folded(
+  "concat_ws(' ', b.code, b.name, b.batch, c.distillery_name, b.region_text, r.name, b.cask_type, b.profile, b.age)",
+);
 
-const DEFAULT_LIMIT = 50;
-const MAX_LIMIT = 200;
+/** `14 years` → 14; `null` for `16 & 21 years` or no age. */
+const AGE_YEARS = "substring(b.age from '^(\\d+) years?$')::int";
 
-function parseIntParam(
-  name: string,
-  value: string | undefined,
-  fallback: number,
-  max: number,
-): number {
-  if (value === undefined || value === '') return fallback;
-  const n = Number(value);
-  if (!Number.isInteger(n) || n < 0 || n > max) {
-    throw new BadRequestException(
-      `${name} must be an integer between 0 and ${max}.`,
-    );
-  }
-  return n;
+/** Values the app can offer as filters, with how many bottles have each. */
+export interface SmwsBottleFacets {
+  kinds: { value: string; count: number }[];
+  /** `tasteep_smws_codes` categories: `single malt`, `rum`, `bourbon`… */
+  categories: { value: string; count: number }[];
+  /** Spelling variants merged (`Deep, Rich & Dried Fruits` / `Deep Rich & …`). */
+  profiles: { value: string; count: number }[];
+  abv: { min: number | null; max: number | null };
+  age: { min: number | null; max: number | null };
+  price: { min: number | null; max: number | null };
+  distilled_years: { min: number | null; max: number | null };
+  released_years: { min: number | null; max: number | null };
 }
 
 export interface SmwsAdminStatus {
@@ -96,75 +94,125 @@ export class SmwsBottlesService {
   ) {}
 
   /**
-   * `status` (default `available`), `kind` (`single_cask`, `blend`, `other`),
-   * `distillery_code` (`1`, `G1`), `region_id` (a country also matches its
-   * subregions), `limit` (≤ 200), `offset`. Newest release first; sold-out
-   * bottles most recently sold out first.
+   * The shop's list: available bottles by default, newest release first,
+   * 50 per page. Takes every filter of `search`.
    */
-  async list(query: ListBottlesQuery = {}): Promise<SmwsBottlePage> {
-    const status = (query.status || 'available') as BottleStatus;
-    if (!BOTTLE_STATUSES.includes(status)) {
-      throw new BadRequestException(
-        `status must be one of ${BOTTLE_STATUSES.join(', ')}.`,
-      );
-    }
-    if (
-      query.kind &&
-      !SMWS_BOTTLE_KINDS.includes(query.kind as SmwsBottleKind)
-    ) {
-      throw new BadRequestException(
-        `kind must be one of ${SMWS_BOTTLE_KINDS.join(', ')}.`,
-      );
-    }
-    const limit = parseIntParam('limit', query.limit, DEFAULT_LIMIT, MAX_LIMIT);
-    const offset = parseIntParam(
-      'offset',
-      query.offset,
-      0,
-      Number.MAX_SAFE_INTEGER,
-    );
+  list(query: BottleSearchQuery = {}): Promise<SmwsBottlePage> {
+    return this.find(query, LIST_DEFAULTS);
+  }
 
+  /**
+   * Finds bottles by any field, for the app's bottle picker: every bottle ever
+   * seen (sold-out ones included, since that is most of what people taste),
+   * best match first, 20 per page. `q` is a cask code or its start (`5.13`),
+   * a distillery code (`29`), or words found anywhere in the bottle (`smoke`,
+   * `glenfarclas oloroso`); the other parameters narrow by field.
+   */
+  search(query: BottleSearchQuery = {}): Promise<SmwsBottlePage> {
+    return this.find(query, SEARCH_DEFAULTS);
+  }
+
+  private async find(
+    query: BottleSearchQuery,
+    defaults: SearchDefaults,
+  ): Promise<SmwsBottlePage> {
+    const search = parseBottleSearch(query, defaults);
     const qb = this.bottles
       .createQueryBuilder('b')
       .leftJoinAndSelect('b.smwsCode', 'c')
-      .leftJoin('b.regionRef', 'r');
-    if (status === 'available') qb.andWhere('b.in_stock = true');
-    if (status === 'delisted') qb.andWhere('b.in_stock = false');
-    if (query.kind) qb.andWhere('b.kind = :kind', { kind: query.kind });
-    if (query.distillery_code) {
-      qb.andWhere('b.distillery_code = :code', {
-        code: query.distillery_code.trim().toUpperCase(),
-      });
-    }
-    if (query.region_id) {
-      qb.andWhere('(b.region_id = :rid OR r.parent_id = :rid)', {
-        rid: query.region_id,
-      });
-    }
-    // Property names, not column names: with a join plus skip/take, TypeORM
-    // resolves ORDER BY through the entity metadata and fails on column names.
-    if (status === 'delisted') qb.orderBy('b.delistedAt', 'DESC', 'NULLS LAST');
-    qb.addOrderBy('b.releasedAt', 'DESC', 'NULLS LAST')
-      .addOrderBy('b.firstSeenAt', 'DESC')
-      .addOrderBy('b.sku', 'ASC')
-      .skip(offset)
-      .take(limit);
-
+      .leftJoin('b.regionRef', 'r')
+      .setParameters({ foldFrom: FOLD_FROM, foldTo: FOLD_TO });
+    applyFilters(qb, search);
+    applyOrder(qb, search);
+    // Both joins are many-to-one (one row per bottle), so a plain LIMIT is
+    // exact and leaves raw ORDER BY expressions alone, unlike skip/take.
+    qb.offset(search.offset).limit(search.limit);
     const [rows, total] = await qb.getManyAndCount();
     return { total, items: rows.map(toSmwsBottleJson) };
   }
 
+  /** Filter values and ranges over the whole catalog, for the app's filter sheet. */
+  async facets(): Promise<SmwsBottleFacets> {
+    const counts = (rows: { value: string; n: string }[]) =>
+      rows.map((r) => ({ value: r.value, count: Number(r.n) }));
+    const [kinds, categories, profiles, ranges] = await Promise.all([
+      this.bottles
+        .createQueryBuilder('b')
+        .select('b.kind', 'value')
+        .addSelect('COUNT(*)', 'n')
+        .groupBy('b.kind')
+        .orderBy('n', 'DESC')
+        .getRawMany<{ value: string; n: string }>(),
+      this.bottles
+        .createQueryBuilder('b')
+        .innerJoin('b.smwsCode', 'c')
+        .select('c.category', 'value')
+        .addSelect('COUNT(*)', 'n')
+        .groupBy('c.category')
+        .orderBy('n', 'DESC')
+        .getRawMany<{ value: string; n: string }>(),
+      this.bottles
+        .createQueryBuilder('b')
+        .select('mode() WITHIN GROUP (ORDER BY b.profile)', 'value')
+        .addSelect('COUNT(*)', 'n')
+        .where('b.profile IS NOT NULL')
+        .groupBy(`regexp_replace(${folded('b.profile')}, '[^a-z]', '', 'g')`)
+        .orderBy('n', 'DESC')
+        .setParameters({ foldFrom: FOLD_FROM, foldTo: FOLD_TO })
+        .getRawMany<{ value: string; n: string }>(),
+      this.bottles
+        .createQueryBuilder('b')
+        .select('MIN(b.abv)', 'abv_min')
+        .addSelect('MAX(b.abv)', 'abv_max')
+        .addSelect(`MIN(${AGE_YEARS})`, 'age_min')
+        .addSelect(`MAX(${AGE_YEARS})`, 'age_max')
+        .addSelect('MIN(b.price_amount)', 'price_min')
+        .addSelect('MAX(b.price_amount)', 'price_max')
+        .addSelect('MIN(EXTRACT(YEAR FROM b.distilled_date))', 'distilled_min')
+        .addSelect('MAX(EXTRACT(YEAR FROM b.distilled_date))', 'distilled_max')
+        .addSelect('MIN(EXTRACT(YEAR FROM b.released_at))', 'released_min')
+        .addSelect('MAX(EXTRACT(YEAR FROM b.released_at))', 'released_max')
+        .getRawOne<Record<string, string | null>>(),
+    ]);
+    const num = (key: string) =>
+      ranges?.[key] == null ? null : Number(ranges[key]);
+    const span = (key: string) => ({
+      min: num(`${key}_min`),
+      max: num(`${key}_max`),
+    });
+    return {
+      kinds: counts(kinds),
+      categories: counts(categories),
+      profiles: counts(profiles),
+      abv: span('abv'),
+      age: span('age'),
+      price: span('price'),
+      distilled_years: span('distilled'),
+      released_years: span('released'),
+    };
+  }
+
   /** By cask code (`1.309`) or SKU. */
   async get(id: string): Promise<SmwsBottleJson> {
+    return toSmwsBottleJson(await this.findRow(id));
+  }
+
+  /** The stored bottle by cask code (`1.309`) or SKU; `404` if unknown. */
+  async findRow(id: string): Promise<TasteepSmwsBottle> {
+    const row = await this.findRowOrNull(id);
+    if (!row) throw new NotFoundException(`No SMWS bottle "${id}".`);
+    return row;
+  }
+
+  /** The stored bottle by cask code (`1.309`) or SKU, with its distillery. */
+  findRowOrNull(id: string): Promise<TasteepSmwsBottle | null> {
     const key = id.trim();
-    const row = await this.bottles.findOne({
+    return this.bottles.findOne({
       where: /^[A-Za-z]*\d+\.\d+$/.test(key)
         ? { code: key.toUpperCase() }
         : { sku: key },
       relations: { smwsCode: true },
     });
-    if (!row) throw new NotFoundException(`No SMWS bottle "${id}".`);
-    return toSmwsBottleJson(row);
   }
 
   async adminStatus(): Promise<SmwsAdminStatus> {
@@ -229,4 +277,135 @@ export class SmwsBottlesService {
       },
     };
   }
+}
+
+function applyRange(
+  qb: SelectQueryBuilder<TasteepSmwsBottle>,
+  sql: string,
+  name: string,
+  range: Range,
+) {
+  if (range.min !== null) {
+    qb.andWhere(`${sql} >= :${name}Min`, { [`${name}Min`]: range.min });
+  }
+  if (range.max !== null) {
+    qb.andWhere(`${sql} <= :${name}Max`, { [`${name}Max`]: range.max });
+  }
+}
+
+function applyFilters(
+  qb: SelectQueryBuilder<TasteepSmwsBottle>,
+  s: BottleSearch,
+) {
+  if (s.status === 'available') qb.andWhere('b.in_stock = true');
+  if (s.status === 'delisted') qb.andWhere('b.in_stock = false');
+  if (s.kind) qb.andWhere('b.kind = :kind', { kind: s.kind });
+  if (s.category) {
+    qb.andWhere('c.category = :category', { category: s.category });
+  }
+  if (s.distilleryCode) {
+    qb.andWhere('b.distillery_code = :code', { code: s.distilleryCode });
+  }
+  if (s.regionId) {
+    qb.andWhere('(b.region_id = :rid OR r.parent_id = :rid)', {
+      rid: s.regionId,
+    });
+  }
+  if (s.profileKey) {
+    qb.andWhere(
+      `regexp_replace(${folded('b.profile')}, '[^a-z]', '', 'g') = :profileKey`,
+      { profileKey: s.profileKey },
+    );
+  }
+  s.caskWords.forEach((word, i) =>
+    qb.andWhere(`${folded('b.cask_type')} LIKE :cask${i}`, {
+      [`cask${i}`]: `%${likeEscape(word)}%`,
+    }),
+  );
+  applyRange(qb, 'b.abv', 'abv', s.abv);
+  applyRange(qb, AGE_YEARS, 'age', s.age);
+  applyRange(qb, 'b.price_amount', 'price', s.price);
+  applyRange(
+    qb,
+    'EXTRACT(YEAR FROM b.distilled_date)',
+    'distilled',
+    s.distilledYears,
+  );
+  applyRange(
+    qb,
+    'EXTRACT(YEAR FROM b.released_at)',
+    'released',
+    s.releasedYears,
+  );
+
+  const text = s.text;
+  if (text?.type === 'code') {
+    qb.andWhere('b.code LIKE :codePrefix', {
+      codePrefix: `${likeEscape(text.code)}%`,
+    });
+  } else if (text) {
+    text.words.forEach((word, i) =>
+      qb.andWhere(`${HAYSTACK} LIKE :word${i}`, {
+        [`word${i}`]: `%${likeEscape(word)}%`,
+      }),
+    );
+  }
+}
+
+/**
+ * Sort keys are selected as aliases and ordered by alias: TypeORM leaves
+ * those untouched, where it would rewrite or reject raw expressions.
+ */
+function applyOrder(
+  qb: SelectQueryBuilder<TasteepSmwsBottle>,
+  s: BottleSearch,
+) {
+  const by = (sql: string, alias: string, order: 'ASC' | 'DESC') => {
+    // Parenthesized: a bare `b.sku` would be read as the entity's own column.
+    qb.addSelect(`(${sql})`, alias).addOrderBy(alias, order, 'NULLS LAST');
+  };
+  const text = s.text;
+  if (s.sort === 'relevance' && text?.type === 'code') {
+    // `5.1` lists 5.1, then 5.10–5.19, then 5.100…: shortest code first.
+    by('length(b.code)', 'sort_rank', 'ASC');
+    by('b.code', 'sort_code', 'ASC');
+  } else if (s.sort === 'relevance' && text?.type === 'words') {
+    const name = folded('b.name');
+    qb.setParameters({
+      qExact: text.folded,
+      qStart: `${likeEscape(text.folded)}%`,
+      qAny: `%${likeEscape(text.folded)}%`,
+      qCode: text.distilleryCode,
+    });
+    by(
+      `CASE
+        WHEN b.distillery_code = :qCode THEN 0
+        WHEN ${name} = :qExact THEN 1
+        WHEN ${name} LIKE :qStart THEN 2
+        WHEN ${name} LIKE :qAny THEN 3
+        WHEN ${folded('c.distillery_name')} LIKE :qStart THEN 4
+        ELSE 5
+      END`,
+      'sort_rank',
+      'ASC',
+    );
+  } else if (s.sort === 'abv') {
+    by('b.abv', 'sort_value', s.order);
+  } else if (s.sort === 'age') {
+    by(AGE_YEARS, 'sort_value', s.order);
+  } else if (s.sort === 'price') {
+    by('b.price_amount', 'sort_value', s.order);
+  } else if (s.sort === 'distilled') {
+    by('b.distilled_date', 'sort_value', s.order);
+  } else if (s.status === 'delisted') {
+    // The archive: most recently sold out first.
+    by('b.delisted_at', 'sort_value', 'DESC');
+  }
+  by(
+    'b.released_at',
+    'sort_released',
+    s.sort === 'released' ? s.order : 'DESC',
+  );
+  by('b.first_seen_at', 'sort_seen', 'DESC');
+  by('b.sku', 'sort_sku', 'ASC');
 }

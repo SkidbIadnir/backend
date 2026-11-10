@@ -59,6 +59,8 @@ export const makeTasting = (
   region: 'Islay',
   regionRef: null,
   regionId: null,
+  smwsBottle: null,
+  smwsSku: null,
   abv: 43,
   price: 65.5,
   ageStatement: '16',

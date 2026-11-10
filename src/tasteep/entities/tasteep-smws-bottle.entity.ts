@@ -38,7 +38,7 @@ export type SmwsBottleKind = (typeof SMWS_BOTTLE_KINDS)[number];
  * read that lacks a field never erases a value already stored.
  *
  * Table `tasteep_smws_catalog` (the Playwright-era `tasteep_smws_bottles`
- * is left in place for comparison until it is dropped).
+ * was dropped on 2026-11-10).
  */
 @Entity('tasteep_smws_catalog')
 @Index('tasteep_smws_catalog_code_key', ['code'], {
