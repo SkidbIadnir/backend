@@ -12,6 +12,8 @@ export interface TastingJson {
   region_id: string | null;
   /** SKU of the SMWS bottle (`GET /tasteep/smws-bottles/:sku`), or `null`. */
   smws_sku: string | null;
+  /** Read-only: the linked bottle's code, batch or name (`29.311`, `Batch 45`). */
+  smws_label: string | null;
   abv: number | null;
   price: number | null;
   age_statement: string | null;
@@ -44,6 +46,9 @@ export function toTastingJson(t: TasteepTasting): TastingJson {
     region: t.region ?? null,
     region_id: t.regionId ?? null,
     smws_sku: t.smwsSku ?? null,
+    smws_label: t.smwsBottle
+      ? (t.smwsBottle.code ?? t.smwsBottle.batch ?? t.smwsBottle.name)
+      : null,
     abv: t.abv ?? null,
     price: t.price ?? null,
     age_statement: t.ageStatement ?? null,

@@ -21,6 +21,7 @@ describe('tasting.mapper', () => {
           'region',
           'region_id',
           'smws_sku',
+          'smws_label',
           'abv',
           'price',
           'age_statement',
@@ -59,6 +60,26 @@ describe('tasting.mapper', () => {
       expect(json.tags).toEqual([]);
       expect(json.location_precision).toBe('unknown');
       expect(json.created_at).toBeNull();
+    });
+
+    it('labels the linked bottle by code, then batch, then name', () => {
+      const label = (b: object | null) =>
+        toTastingJson(
+          makeTasting({
+            smwsBottle: b as TasteepTasting['smwsBottle'],
+            smwsSku: b ? 'SKU' : null,
+          }),
+        ).smws_label;
+      expect(label({ code: '29.311', batch: null, name: 'Diesel' })).toBe(
+        '29.311',
+      );
+      expect(label({ code: null, batch: 'Batch 45', name: 'Twist' })).toBe(
+        'Batch 45',
+      );
+      expect(label({ code: null, batch: null, name: 'Islay trio' })).toBe(
+        'Islay trio',
+      );
+      expect(label(null)).toBeNull();
     });
   });
 

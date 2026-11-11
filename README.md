@@ -30,7 +30,7 @@ src/
 │   │   ├── auth-user.ts                 AuthUser JSON mapper
 │   │   └── dto/
 │   ├── mail/                nodemailer SMTP transport (logs the code when SMTP is unset)
-│   ├── tastings/            /tasteep/tastings, /tasteep/stats, prefill from an SMWS bottle
+│   ├── tastings/            /tasteep/tastings, /tasteep/stats, /tasteep/smws/me, prefill from an SMWS bottle
 │   │   ├── tastings.controller.ts / .service.ts / .module.ts
 │   │   ├── tasting.mapper.ts            entity ⇄ snake_case JSON contract
 │   │   └── dto/

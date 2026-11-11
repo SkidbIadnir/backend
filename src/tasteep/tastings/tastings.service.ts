@@ -38,10 +38,18 @@ export class TastingsService {
     private readonly bottles: SmwsBottlesService,
   ) {}
 
-  /** Newest `date_tasted` first; undated entries last. `unplaced` keeps only `unknown`/`country` precision. */
+  /**
+   * Newest `date_tasted` first; undated entries last. `unplaced` keeps only
+   * `unknown`/`country` precision; `smwsSku` the tastings of one bottle;
+   * `smwsDistillery` those of one SMWS distillery code (`29`).
+   */
   async list(
     userId: string,
-    options: { unplaced?: boolean } = {},
+    options: {
+      unplaced?: boolean;
+      smwsSku?: string;
+      smwsDistillery?: string;
+    } = {},
   ): Promise<TastingJson[]> {
     const rows = await this.repo.find({
       where: {
@@ -49,7 +57,16 @@ export class TastingsService {
         ...(options.unplaced
           ? { locationPrecision: In(UNPLACED_PRECISIONS) }
           : {}),
+        ...(options.smwsSku ? { smwsSku: options.smwsSku } : {}),
+        ...(options.smwsDistillery
+          ? {
+              smwsBottle: {
+                distilleryCode: options.smwsDistillery.toUpperCase(),
+              },
+            }
+          : {}),
       },
+      relations: { smwsBottle: true },
       order: {
         dateTasted: { direction: 'DESC', nulls: 'LAST' },
         createdAt: 'DESC',
@@ -216,7 +233,10 @@ export class TastingsService {
   }
 
   private async findOwned(userId: string, id: string): Promise<TasteepTasting> {
-    const tasting = await this.repo.findOne({ where: { id, userId } });
+    const tasting = await this.repo.findOne({
+      where: { id, userId },
+      relations: { smwsBottle: true },
+    });
     if (!tasting) {
       throw new NotFoundException('Tasting not found.');
     }

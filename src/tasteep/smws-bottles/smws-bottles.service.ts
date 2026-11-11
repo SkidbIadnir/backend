@@ -48,6 +48,12 @@ export interface SmwsBottleFacets {
   price: { min: number | null; max: number | null };
   distilled_years: { min: number | null; max: number | null };
   released_years: { min: number | null; max: number | null };
+  /** Bottles on sale now. */
+  available: number;
+  /** Sold-out bottles: the archive. */
+  delisted: number;
+  /** End of the last successful scrape; `null` before the first one. */
+  synced_at: string | null;
 }
 
 export interface SmwsAdminStatus {
@@ -135,7 +141,7 @@ export class SmwsBottlesService {
   async facets(): Promise<SmwsBottleFacets> {
     const counts = (rows: { value: string; n: string }[]) =>
       rows.map((r) => ({ value: r.value, count: Number(r.n) }));
-    const [kinds, categories, profiles, ranges] = await Promise.all([
+    const [kinds, categories, profiles, ranges, lastRun] = await Promise.all([
       this.bottles
         .createQueryBuilder('b')
         .select('b.kind', 'value')
@@ -172,7 +178,13 @@ export class SmwsBottlesService {
         .addSelect('MAX(EXTRACT(YEAR FROM b.distilled_date))', 'distilled_max')
         .addSelect('MIN(EXTRACT(YEAR FROM b.released_at))', 'released_min')
         .addSelect('MAX(EXTRACT(YEAR FROM b.released_at))', 'released_max')
+        .addSelect('COUNT(*) FILTER (WHERE b.in_stock)', 'available')
+        .addSelect('COUNT(*) FILTER (WHERE NOT b.in_stock)', 'delisted')
         .getRawOne<Record<string, string | null>>(),
+      this.runs.findOne({
+        where: { status: 'succeeded' },
+        order: { finishedAt: 'DESC' },
+      }),
     ]);
     const num = (key: string) =>
       ranges?.[key] == null ? null : Number(ranges[key]);
@@ -189,6 +201,9 @@ export class SmwsBottlesService {
       price: span('price'),
       distilled_years: span('distilled'),
       released_years: span('released'),
+      available: num('available') ?? 0,
+      delisted: num('delisted') ?? 0,
+      synced_at: lastRun?.finishedAt?.toISOString() ?? null,
     };
   }
 
@@ -311,6 +326,7 @@ function applyFilters(
       rid: s.regionId,
     });
   }
+  if (s.profileNone) qb.andWhere('b.profile IS NULL');
   if (s.profileKey) {
     qb.andWhere(
       `regexp_replace(${folded('b.profile')}, '[^a-z]', '', 'g') = :profileKey`,
