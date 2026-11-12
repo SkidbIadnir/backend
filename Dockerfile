@@ -16,6 +16,11 @@ COPY . .
 # Build the application
 RUN npm run build
 
+# Tasting photos. Mount a persistent volume here (see README "Docker / CI"),
+# otherwise uploads are lost when the container is replaced.
+ENV TASTEEP_PHOTOS_DIR=/data/photos
+RUN mkdir -p /data/photos
+
 # Expose the port
 EXPOSE 3000
 

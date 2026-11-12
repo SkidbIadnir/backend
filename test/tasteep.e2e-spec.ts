@@ -41,6 +41,8 @@ const TASTING_KEYS = [
   'name',
   'category',
   'photo_path',
+  'photo_url',
+  'photo_thumb_url',
   'distillery',
   'region',
   'region_id',

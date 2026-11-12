@@ -17,6 +17,8 @@ describe('tasting.mapper', () => {
           'name',
           'category',
           'photo_path',
+          'photo_url',
+          'photo_thumb_url',
           'distillery',
           'region',
           'region_id',
@@ -56,10 +58,26 @@ describe('tasting.mapper', () => {
       } as TasteepTasting;
       const json = toTastingJson(bare);
       expect(json.photo_path).toBeNull();
+      expect(json.photo_url).toBeNull();
+      expect(json.photo_thumb_url).toBeNull();
       expect(json.date_tasted).toBeNull();
       expect(json.tags).toEqual([]);
       expect(json.location_precision).toBe('unknown');
       expect(json.created_at).toBeNull();
+    });
+
+    it('signs absolute photo URLs from APP_URL when a photo is uploaded', () => {
+      process.env.TASTEEP_PHOTO_URL_SECRET = 'unit-test-photo-secret';
+      process.env.APP_URL = 'https://api.example.test/';
+      const photoId = '1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed';
+      const json = toTastingJson(makeTasting({ photoId }));
+      expect(json.photo_url).toMatch(
+        new RegExp(
+          `^https://api\\.example\\.test/tasteep/photos/${photoId}/full\\?exp=\\d+&sig=[\\w-]+$`,
+        ),
+      );
+      expect(json.photo_thumb_url).toContain(`/${photoId}/thumb?`);
+      delete process.env.APP_URL;
     });
 
     it('labels the linked bottle by code, then batch, then name', () => {
