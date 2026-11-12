@@ -6,6 +6,7 @@ import { RegionsModule } from './regions/regions.module';
 import { WishlistModule } from './wishlist/wishlist.module';
 import { SmwsCodesModule } from './smws-codes/smws-codes.module';
 import { SmwsBottlesModule } from './smws-bottles/smws-bottles.module';
+import { PhotosModule } from './photos/photos.module';
 
 /**
  * Tasteep — the spirit-tasting journal behind the Flutter app.
@@ -22,6 +23,7 @@ import { SmwsBottlesModule } from './smws-bottles/smws-bottles.module';
     WishlistModule,
     SmwsCodesModule,
     SmwsBottlesModule,
+    PhotosModule,
   ],
 })
 export class TasteepModule {}

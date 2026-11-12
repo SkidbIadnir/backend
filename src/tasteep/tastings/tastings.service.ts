@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { randomUUID } from 'node:crypto';
 import { In, Repository } from 'typeorm';
 import {
   TasteepTasting,
@@ -14,6 +15,8 @@ import { UpsertTastingDto } from './dto/upsert-tasting.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
 import { RegionsService } from '../regions/regions.service';
 import { SmwsBottlesService } from '../smws-bottles/smws-bottles.service';
+import { PhotoStorageService } from '../photos/photo-storage.service';
+import { processPhoto } from '../photos/photo-processor';
 import { applyUpsertDto, TastingJson, toTastingJson } from './tasting.mapper';
 import {
   codeInName,
@@ -29,6 +32,17 @@ export interface TastingStats {
 
 const round1 = (v: number) => Math.round(v * 10) / 10;
 
+/**
+ * `photo_id` is only written by `setPhoto`/`removePhoto`. TypeORM's `save`
+ * writes back every loaded column that differs from the database, so a
+ * tasting PUT racing a photo upload would restore the old id; `undefined`
+ * columns are skipped.
+ */
+const withoutPhoto = (t: TasteepTasting): TasteepTasting => ({
+  ...t,
+  photoId: undefined as unknown as null,
+});
+
 @Injectable()
 export class TastingsService {
   constructor(
@@ -36,6 +50,7 @@ export class TastingsService {
     private readonly repo: Repository<TasteepTasting>,
     private readonly regions: RegionsService,
     private readonly bottles: SmwsBottlesService,
+    private readonly photos: PhotoStorageService,
   ) {}
 
   /**
@@ -119,7 +134,7 @@ export class TastingsService {
       target.locationPrecision = 'manual';
     }
 
-    await this.repo.save(target);
+    await this.repo.save(withoutPhoto(target));
     return toTastingJson(await this.findOwned(userId, id));
   }
 
@@ -171,11 +186,49 @@ export class TastingsService {
       : null;
   }
 
+  /** Deletes the tasting, then its photo files. */
   async remove(userId: string, id: string): Promise<void> {
-    const result = await this.repo.delete({ id, userId });
-    if (!result.affected) {
+    const tasting = await this.repo.findOne({ where: { id, userId } });
+    if (!tasting) {
       throw new NotFoundException('Tasting not found.');
     }
+    await this.repo.delete({ id, userId });
+    if (tasting.photoId) await this.photos.remove(tasting.photoId);
+  }
+
+  /**
+   * Stores `upload` as the tasting's photo, replacing any previous one. The
+   * new files are written before the row points at them and the old files
+   * are deleted after, so a failure never leaves the row on a missing file.
+   */
+  async setPhoto(
+    userId: string,
+    id: string,
+    upload: Buffer,
+  ): Promise<TastingJson> {
+    const tasting = await this.findOwned(userId, id);
+    const processed = await processPhoto(upload);
+
+    const photoId = randomUUID();
+    await this.photos.save(photoId, processed);
+    try {
+      await this.repo.update({ id, userId }, { photoId });
+    } catch (err) {
+      await this.photos.remove(photoId);
+      throw err;
+    }
+    if (tasting.photoId) await this.photos.remove(tasting.photoId);
+    return toTastingJson(await this.findOwned(userId, id));
+  }
+
+  /** Detaches and deletes the uploaded photo. A no-op when there is none. */
+  async removePhoto(userId: string, id: string): Promise<TastingJson> {
+    const tasting = await this.findOwned(userId, id);
+    if (tasting.photoId) {
+      await this.repo.update({ id, userId }, { photoId: null });
+      await this.photos.remove(tasting.photoId);
+    }
+    return toTastingJson(await this.findOwned(userId, id));
   }
 
   /** Pin-drop / geocode-result / clear. See `UpdateLocationDto` for the rules. */
@@ -207,7 +260,7 @@ export class TastingsService {
       tasting.locationPrecision = dto.precision;
     }
 
-    await this.repo.save(tasting);
+    await this.repo.save(withoutPhoto(tasting));
     return toTastingJson(await this.findOwned(userId, id));
   }
 

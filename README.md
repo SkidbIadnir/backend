@@ -82,8 +82,9 @@ guard loads the session on every request, so `POST /auth/signout` revokes a toke
 check constraints on `category`, `location_precision`, `score`, indexes on
 `(user_id, date_tasted)` and `(user_id, category)`). Two deliberate deviations:
 
-- `photo_path` instead of `photo_url`: photos stay on the device for now, so the column holds
-  whatever opaque string the client sends and echoes it back. No upload endpoint exists.
+- `photo_path` is kept next to the uploaded photo: it holds whatever opaque device path the
+  client sends and echoes it back, so the app can show the local file offline. The uploaded
+  photo is `photo_id` (server-generated), exposed as signed `photo_url`/`photo_thumb_url`.
 - `tasteep_geocode_cache.lat/lon` are nullable: misses are cached as `unknown` so a place
   Nominatim cannot resolve is never asked for again.
 
@@ -103,6 +104,9 @@ check constraints on `category`, `location_precision`, `score`, indexes on
 | `PUT` | `/tasteep/tastings/:id` | Upsert, full replacement, client-generated UUID |
 | `DELETE` | `/tasteep/tastings/:id` | Delete |
 | `PUT` | `/tasteep/tastings/:id/location` | Manual pin / geocode result / clear |
+| `PUT` | `/tasteep/tastings/:id/photo` | Upload / replace the photo (multipart `photo`) |
+| `DELETE` | `/tasteep/tastings/:id/photo` | Remove the photo |
+| `GET` | `/tasteep/photos/:photoId/:size` | Signed photo URL (no token), `full` or `thumb` |
 | `GET` | `/tasteep/stats` | `{count, avg_score, distinct_distilleries}` |
 | `POST` | `/tasteep/geocode` | `{query}` → `{lat, lon, precision}` |
 | `GET` | `/tasteep/regions` | Country → subregion tree with centroids, ETag/304 |
@@ -118,6 +122,21 @@ Request/response details, status codes and the location-precision rules are in
 - Nominatim is called at most once per second for the whole server, always with the
   identifying `TASTEEP_NOMINATIM_USER_AGENT`, and every result (including "not found") is
   cached forever. Identical concurrent queries share one upstream request.
+- Uploaded photos are re-encoded by `sharp` (WebP, ≤ 2048 px and a 480 px thumbnail) with all
+  metadata stripped — phone photos carry GPS coordinates. Anything sharp cannot decode as
+  JPEG/PNG/WebP/AVIF is a `400`; uploads are capped at 20 MB (`413`).
+
+### Tasting photos
+
+Files live on local disk under `TASTEEP_PHOTOS_DIR` (`<dir>/<2 hex>/<photo_id>.webp` and
+`.thumb.webp`). Only `src/tasteep/photos/photo-storage.service.ts` knows that, so moving to
+S3-compatible storage later means replacing that one class.
+
+Photos are served without the bearer token, through an HMAC-signed URL, so Flutter's
+`Image.network` works on Android and on the web build alike. The expiry is snapped to a UTC day
+boundary: URLs are identical all day (HTTP caches keep hitting) and valid 24–48 h. A new upload
+gets a new `photo_id`, so a cached old photo is never shown for it. Deleting a photo or its
+tasting deletes the files.
 
 ### SMWS bottles
 
@@ -176,6 +195,13 @@ Requirements: Node 20+, PostgreSQL 14+. Outside production (`NODE_ENV !== 'produ
 TypeORM `synchronize` creates and alters tables on boot; in production apply the schema
 yourself or run once with synchronize before switching the flag.
 
+Schema changes to apply by hand in production:
+
+```sql
+-- tasting photos
+ALTER TABLE tasteep_tastings ADD COLUMN IF NOT EXISTS photo_id uuid;
+```
+
 ### Environment variables
 
 | Variable | Project | Required | Notes |
@@ -195,6 +221,8 @@ yourself or run once with synchronize before switching the flag.
 | `TASTEEP_SMWS_SCRAPER_ENABLED` | Tasteep | no | default `true`; `false` → no nightly scrape |
 | `TASTEEP_SMWS_REQUEST_INTERVAL_MS` | Tasteep | no | default `3000`; gap between requests to smws.eu |
 | `TASTEEP_SMWS_USER_AGENT` | Tasteep | no | User-Agent sent to smws.eu |
+| `TASTEEP_PHOTOS_DIR` | Tasteep | in production | default `./data/photos`; `/data/photos` in the image. Must be a persistent volume |
+| `TASTEEP_PHOTO_URL_SECRET` | Tasteep | no | key for signing photo URLs; default derived from `TASTEEP_JWT_SECRET` |
 
 ## Postman
 
@@ -266,8 +294,13 @@ curl -X POST localhost:3000/auth/email -H 'content-type: application/json' -d '{
 
 ```bash
 docker build -t backend .
-docker run -p 3000:3000 --env-file .env backend
+docker run -p 3000:3000 --env-file .env -v /srv/tasteep/photos:/data/photos backend
 ```
+
+The `-v` mount is what keeps uploaded photos across redeploys: without it they live in the
+container and disappear with it. The photos directory is not in Postgres, so back it up
+alongside the database dump (e.g. a nightly `restic backup /srv/tasteep/photos` to off-site
+storage).
 
 `.github/workflows/ci-cd.yml` runs `npm test`, then builds and pushes the image to `ghcr.io`
 on every push to `master`.
@@ -276,8 +309,9 @@ on every push to `master`.
 
 - Email login = OTP code (no deep link needed on mobile). Tokens = long-lived JWT + revocable
   `tasteep_sessions` row. Google = ID-token verification, Discord = server-side code exchange.
-- Photos remain on-device; `photo_path` is opaque. Add an upload endpoint + object storage
-  when a home for the files is chosen.
+- Photos are stored on the VPS disk (one per tasting), served via signed URLs rather than the
+  bearer token because Flutter web's `Image.network` cannot send one. Swap
+  `PhotoStorageService` for object storage if the disk ever becomes the limit.
 - `?unplaced=true` on the list endpoint was chosen over a separate `/unplaced` route.
 - Settings columns (`theme_mode`, `score_scale`, `unit_system`, `currency`) exist on
   `tasteep_users` but have no endpoint yet.

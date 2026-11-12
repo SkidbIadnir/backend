@@ -72,6 +72,23 @@ export const tasteepConfig = {
     return process.env.TASTEEP_NOMINATIM_USER_AGENT || undefined;
   },
 
+  // --- Tasting photos ----------------------------------------------------------
+  /** Where processed photos are written. Mount a persistent volume here in production. */
+  get photosDir(): string {
+    return process.env.TASTEEP_PHOTOS_DIR || './data/photos';
+  },
+  /**
+   * Key for signing photo URLs. Falls back to a key derived from the JWT
+   * secret, so rotating either one invalidates every issued photo URL.
+   */
+  get photoUrlSecret(): string | undefined {
+    return process.env.TASTEEP_PHOTO_URL_SECRET || undefined;
+  },
+  /** Public base URL of this API, used to build absolute photo URLs. */
+  get appUrl(): string {
+    return (process.env.APP_URL ?? '').replace(/\/+$/, '');
+  },
+
   // --- SMWS bottles scraper ----------------------------------------------------
   /** Nightly scrape of smws.eu. Manual runs from `/admin/smws` work either way. */
   get smwsScraperEnabled(): boolean {

@@ -55,6 +55,7 @@ export const makeTasting = (
   name: 'Lagavulin 16',
   category: 'whisky',
   photoPath: null,
+  photoId: null,
   distillery: 'Lagavulin',
   region: 'Islay',
   regionRef: null,

@@ -6,9 +6,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { In } from 'typeorm';
+import sharp from 'sharp';
 import { TastingsService } from './tastings.service';
 import { RegionsService } from '../regions/regions.service';
 import { SmwsBottlesService } from '../smws-bottles/smws-bottles.service';
+import { PhotoStorageService } from '../photos/photo-storage.service';
 import type { TasteepSmwsBottle } from '../entities/tasteep-smws-bottle.entity';
 import { TasteepTasting } from '../entities/tasteep-tasting.entity';
 import {
@@ -30,6 +32,8 @@ describe('TastingsService', () => {
   let repo: MockRepository<TasteepTasting>;
   const regions = { resolve: jest.fn() };
   const bottles = { findRow: jest.fn(), findRowOrNull: jest.fn() };
+  const photos = { save: jest.fn(), remove: jest.fn() };
+  const OLD_PHOTO_ID = '0f0e0d0c-0b0a-4908-8706-050403020100';
   const bottle = (over: Partial<TasteepSmwsBottle> = {}) =>
     ({
       sku: '029311GX0700612',
@@ -66,12 +70,16 @@ describe('TastingsService', () => {
     regions.resolve.mockReset().mockResolvedValue(null);
     bottles.findRow.mockReset();
     bottles.findRowOrNull.mockReset().mockResolvedValue(null);
+    photos.save.mockReset().mockResolvedValue(undefined);
+    photos.remove.mockReset().mockResolvedValue(undefined);
+    process.env.TASTEEP_PHOTO_URL_SECRET = 'unit-test-photo-secret';
     const module = await Test.createTestingModule({
       providers: [
         TastingsService,
         { provide: getRepositoryToken(TasteepTasting), useValue: repo },
         { provide: RegionsService, useValue: regions },
         { provide: SmwsBottlesService, useValue: bottles },
+        { provide: PhotoStorageService, useValue: photos },
       ],
     }).compile();
     service = module.get(TastingsService);
@@ -406,19 +414,145 @@ describe('TastingsService', () => {
 
   describe('remove', () => {
     it('deletes only within the user scope', async () => {
+      repo.findOne!.mockResolvedValue(makeTasting());
       repo.delete!.mockResolvedValue({ affected: 1 });
       await service.remove(USER_ID, TASTING_ID);
+      expect(repo.findOne).toHaveBeenCalledWith({
+        where: { id: TASTING_ID, userId: USER_ID },
+      });
       expect(repo.delete).toHaveBeenCalledWith({
         id: TASTING_ID,
         userId: USER_ID,
       });
+      expect(photos.remove).not.toHaveBeenCalled();
     });
 
-    it('404s when nothing was deleted', async () => {
-      repo.delete!.mockResolvedValue({ affected: 0 });
+    it('deletes the photo files with the tasting', async () => {
+      repo.findOne!.mockResolvedValue(makeTasting({ photoId: OLD_PHOTO_ID }));
+      repo.delete!.mockResolvedValue({ affected: 1 });
+      await service.remove(USER_ID, TASTING_ID);
+      expect(photos.remove).toHaveBeenCalledWith(OLD_PHOTO_ID);
+    });
+
+    it("404s when the tasting is not the user's", async () => {
+      repo.findOne!.mockResolvedValue(null);
       await expect(service.remove(USER_ID, TASTING_ID)).rejects.toBeInstanceOf(
         NotFoundException,
       );
+      expect(repo.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('photos', () => {
+    let jpeg: Buffer;
+    beforeAll(async () => {
+      jpeg = await sharp({
+        create: { width: 64, height: 32, channels: 3, background: '#a33' },
+      })
+        .jpeg()
+        .toBuffer();
+    });
+
+    /** findOwned returns `before` until `repo.update` changes it. */
+    const rows = (before: TasteepTasting) => {
+      let current = before;
+      repo.findOne!.mockImplementation(() => Promise.resolve(current));
+      repo.update!.mockImplementation(
+        (_where: unknown, set: Partial<TasteepTasting>) => {
+          current = { ...current, ...set };
+          return Promise.resolve({ affected: 1 });
+        },
+      );
+    };
+
+    it('stores a new photo and returns signed URLs', async () => {
+      rows(makeTasting());
+      const result = await service.setPhoto(USER_ID, TASTING_ID, jpeg);
+
+      const [photoId, processed] = photos.save.mock.calls[0] as [
+        string,
+        { full: Buffer; thumb: Buffer },
+      ];
+      expect(photoId).toMatch(/^[0-9a-f-]{36}$/);
+      expect((await sharp(processed.full).metadata()).format).toBe('webp');
+      expect(repo.update).toHaveBeenCalledWith(
+        { id: TASTING_ID, userId: USER_ID },
+        { photoId },
+      );
+      expect(result.photo_url).toContain(`/tasteep/photos/${photoId}/full?`);
+      expect(result.photo_thumb_url).toContain(
+        `/tasteep/photos/${photoId}/thumb?`,
+      );
+      expect(photos.remove).not.toHaveBeenCalled();
+    });
+
+    it('deletes the previous files only after pointing at the new ones', async () => {
+      rows(makeTasting({ photoId: OLD_PHOTO_ID }));
+      await service.setPhoto(USER_ID, TASTING_ID, jpeg);
+      expect(photos.remove).toHaveBeenCalledWith(OLD_PHOTO_ID);
+      expect(photos.remove.mock.invocationCallOrder[0]).toBeGreaterThan(
+        repo.update!.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('cleans up the new files when the row update fails', async () => {
+      rows(makeTasting({ photoId: OLD_PHOTO_ID }));
+      repo.update!.mockRejectedValue(new Error('db down'));
+      await expect(service.setPhoto(USER_ID, TASTING_ID, jpeg)).rejects.toThrow(
+        'db down',
+      );
+      const [photoId] = photos.save.mock.calls[0] as [string];
+      expect(photos.remove).toHaveBeenCalledWith(photoId);
+      expect(photos.remove).not.toHaveBeenCalledWith(OLD_PHOTO_ID);
+    });
+
+    it('400s on a file that is not an image, before touching storage', async () => {
+      rows(makeTasting());
+      await expect(
+        service.setPhoto(USER_ID, TASTING_ID, Buffer.from('not an image')),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(photos.save).not.toHaveBeenCalled();
+    });
+
+    it("404s for another user's tasting", async () => {
+      repo.findOne!.mockResolvedValue(null);
+      await expect(
+        service.setPhoto(USER_ID, TASTING_ID, jpeg),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(photos.save).not.toHaveBeenCalled();
+    });
+
+    it('removePhoto clears the column, then deletes the files', async () => {
+      rows(makeTasting({ photoId: OLD_PHOTO_ID }));
+      const result = await service.removePhoto(USER_ID, TASTING_ID);
+      expect(repo.update).toHaveBeenCalledWith(
+        { id: TASTING_ID, userId: USER_ID },
+        { photoId: null },
+      );
+      expect(photos.remove).toHaveBeenCalledWith(OLD_PHOTO_ID);
+      expect(result.photo_url).toBeNull();
+    });
+
+    it('removePhoto is a no-op without a photo', async () => {
+      rows(makeTasting());
+      await service.removePhoto(USER_ID, TASTING_ID);
+      expect(repo.update).not.toHaveBeenCalled();
+      expect(photos.remove).not.toHaveBeenCalled();
+    });
+
+    it('upsert and updateLocation never write photo_id back', async () => {
+      // A PUT racing an upload must not restore the id it loaded.
+      repo.findOne!.mockResolvedValue(makeTasting({ photoId: OLD_PHOTO_ID }));
+      repo.save!.mockImplementation((t: TasteepTasting) => Promise.resolve(t));
+      await service.upsert(USER_ID, TASTING_ID, makeUpsertDto());
+      await service.updateLocation(USER_ID, TASTING_ID, {
+        lat: 1,
+        lon: 2,
+        precision: 'manual',
+      });
+      for (const [saved] of repo.save!.mock.calls as [TasteepTasting][]) {
+        expect(saved.photoId).toBeUndefined();
+      }
     });
   });
 
