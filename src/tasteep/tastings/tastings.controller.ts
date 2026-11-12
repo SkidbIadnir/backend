@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -10,14 +11,18 @@ import {
   Put,
   Query,
   Req,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { TasteepJwtAuthGuard } from '../auth/tasteep-jwt-auth.guard';
 import type { TasteepAuthRequest } from '../auth/tasteep-jwt-auth.guard';
 import { TastingsService } from './tastings.service';
 import { SmwsMeService } from './smws-me.service';
 import { UpsertTastingDto } from './dto/upsert-tasting.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
+import { PHOTO_MAX_UPLOAD_BYTES } from '../photos/photo-processor';
 
 const isTruthy = (v: string | undefined) => v === 'true' || v === '1';
 
@@ -89,6 +94,38 @@ export class TastingsController {
     @Body() dto: UpdateLocationDto,
   ) {
     return this.tastings.updateLocation(req.user.sub, id, dto);
+  }
+
+  /**
+   * Multipart upload, one file in the `photo` field. Replaces any previous
+   * photo and returns the tasting with fresh `photo_url`/`photo_thumb_url`.
+   * The tasting must exist first (`404` otherwise). `413` above 20 MB.
+   */
+  @Put(':id/photo')
+  @UseInterceptors(
+    FileInterceptor('photo', {
+      limits: { fileSize: PHOTO_MAX_UPLOAD_BYTES, files: 1 },
+    }),
+  )
+  setPhoto(
+    @Req() req: TasteepAuthRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @UploadedFile() photo: Express.Multer.File | undefined,
+  ) {
+    if (!photo?.buffer?.length) {
+      throw new BadRequestException(
+        'Send the image as multipart/form-data in a "photo" field.',
+      );
+    }
+    return this.tastings.setPhoto(req.user.sub, id, photo.buffer);
+  }
+
+  @Delete(':id/photo')
+  removePhoto(
+    @Req() req: TasteepAuthRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.tastings.removePhoto(req.user.sub, id);
   }
 }
 

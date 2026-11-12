@@ -33,6 +33,8 @@ Exactly `lib/models/tasting.dart`. Every field except `id`, `name`, `category`, 
   "name": "Lagavulin 16",
   "category": "whisky",                  // "whisky" | "rum" | "agave" | "other"
   "photo_path": "/data/user/0/…/a.jpg",  // opaque client-side path, stored & echoed as-is
+  "photo_url": "https://api.skidhub.fr/tasteep/photos/1b9d…/full?exp=1794700800&sig=…",  // read-only, or null
+  "photo_thumb_url": "https://api.skidhub.fr/tasteep/photos/1b9d…/thumb?exp=1794700800&sig=…",  // read-only, or null
   "distillery": "Lagavulin",
   "region": "Islay",                     // free text, kept verbatim
   "region_id": "scotland/islay",         // link into GET /tasteep/regions, or null
@@ -120,6 +122,8 @@ All scoped to the authenticated user; other users' rows are invisible (404).
 | `PUT` | `/tasteep/tastings/:id` | `Tasting` (see below) | `200 Tasting` |
 | `DELETE` | `/tasteep/tastings/:id` | — | `204` / `404` |
 | `PUT` | `/tasteep/tastings/:id/location` | `{"lat", "lon", "precision"}` | `200 Tasting` / `409` |
+| `PUT` | `/tasteep/tastings/:id/photo` | multipart, file in `photo` | `200 Tasting` / `400` / `404` / `413` |
+| `DELETE` | `/tasteep/tastings/:id/photo` | — | `200 Tasting` / `404` |
 
 ### `PUT /tasteep/tastings/:id` — upsert
 
@@ -167,6 +171,42 @@ Typical Atlas flow: `POST /tasteep/geocode {query}` → `PUT …/location` with 
 precision}` it returned. The "NOT PLACED" shelf is `GET /tasteep/tastings?unplaced=true`
 (`unknown` → *set location*, `country` → *refine*); placing a tasting removes it from the shelf,
 clearing it puts it back.
+
+### Photos
+
+One photo per tasting. `photo_path` (the device path) and the uploaded photo are independent:
+keep sending `photo_path` on every PUT so the app can show the local file offline; the full
+`PUT /tasteep/tastings/:id` never touches the uploaded photo.
+
+**Upload — `PUT /tasteep/tastings/:id/photo`**, `multipart/form-data`, the image in a field
+named `photo`. The tasting must exist first: PUT the tasting, then its photo (`404` otherwise,
+also for another user's tasting).
+
+- JPEG, PNG, WebP or AVIF, at most 20 MB (`413` above). Anything else, or no `photo` field, is a
+  `400`. HEIC is not decoded — on iOS Safari the web build receives a JPEG from the picker
+  anyway; to be safe, pick with `imageQuality`/`maxWidth` set so `image_picker` re-encodes.
+- The server re-encodes to WebP at two sizes (≤ 2048 px and ≤ 480 px on the long edge, never
+  enlarged), applies the EXIF rotation and **drops all metadata, GPS included**.
+- Uploading again replaces the photo. The response is the full `Tasting` with new URLs.
+
+**Remove — `DELETE /tasteep/tastings/:id/photo`** → `200 Tasting` with both URLs `null`.
+Deleting the tasting deletes its photo too.
+
+**Display.** `photo_url` (full) and `photo_thumb_url` (lists, the Atlas) are signed URLs that
+need **no `Authorization` header** — pass them straight to `Image.network` /
+`CachedNetworkImage`, on Android and on web. They are valid for at least 24 h and identical
+for every request made the same UTC day, so HTTP caching works. When one returns `403` it
+has expired: re-fetch the tasting (any list or `GET` returns fresh URLs). `404` means the
+photo was replaced or deleted. With `cached_network_image`, use the photo id (the path
+segment after `/tasteep/photos/`) as `cacheKey` so the cache survives the daily URL change.
+
+```dart
+final req = http.MultipartRequest('PUT', Uri.parse('$baseUrl/tasteep/tastings/$id/photo'))
+  ..headers['Authorization'] = 'Bearer $token'
+  ..files.add(http.MultipartFile.fromBytes('photo', await xfile.readAsBytes(),
+      filename: xfile.name)); // readAsBytes works on Android and web alike
+final tasting = Tasting.fromJson(jsonDecode(await (await req.send()).stream.bytesToString()));
+```
 
 ---
 
@@ -440,7 +480,10 @@ clients may call this freely; they should still store the result on the tasting 
    `POST /auth/email/verify`.
 2. **Google:** send `{"id_token": …}`. **Discord:** send `{"code": …, "redirect_uri": …}`.
 3. **Sign-out** should call `POST /auth/signout` before dropping the local token.
-4. `photo_path` is stored verbatim; photos are not uploaded. There is no photo endpoint yet.
+4. **Photos.** `Tasting` gains `photo_url` and `photo_thumb_url` (nullable, read-only; add
+   them to `tasting.dart`). After saving a tasting with a new picture, upload it with
+   `PUT /tasteep/tastings/:id/photo`; show `photo_thumb_url` in lists and `photo_url` on the
+   detail screen, falling back to `photo_path` when offline. See [Photos](#photos).
 5. **Regions.** `Tasting` gains `region_id` (nullable string; add it to `tasting.dart`).
    Fetch `GET /tasteep/regions` once per session for the picker; keep the free-text field
    so the user can still type anything. On the Atlas, draw a tasting with null `lat`/`lon`

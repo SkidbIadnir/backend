@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import {
   TastingAggregatesController,
@@ -23,6 +24,8 @@ describe('Tasteep tastings controllers', () => {
       upsert: jest.fn(),
       remove: jest.fn(),
       updateLocation: jest.fn(),
+      setPhoto: jest.fn(),
+      removePhoto: jest.fn(),
       stats: jest.fn().mockResolvedValue({
         count: 0,
         avg_score: null,
@@ -87,6 +90,28 @@ describe('Tasteep tastings controllers', () => {
       lon: 2,
       precision: 'manual',
     });
+  });
+
+  it('routes a photo upload and removal with the user id', async () => {
+    const buffer = Buffer.from('jpeg bytes');
+    await tastings.setPhoto(req, TASTING_ID, {
+      buffer,
+    } as Express.Multer.File);
+    await tastings.removePhoto(req, TASTING_ID);
+    expect(service.setPhoto).toHaveBeenCalledWith(USER_ID, TASTING_ID, buffer);
+    expect(service.removePhoto).toHaveBeenCalledWith(USER_ID, TASTING_ID);
+  });
+
+  it('400s a photo upload without a file', () => {
+    for (const file of [
+      undefined,
+      { buffer: Buffer.alloc(0) } as Express.Multer.File,
+    ]) {
+      expect(() => tastings.setPhoto(req, TASTING_ID, file)).toThrow(
+        BadRequestException,
+      );
+    }
+    expect(service.setPhoto).not.toHaveBeenCalled();
   });
 
   it('exposes stats under /tasteep', async () => {

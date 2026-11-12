@@ -1,5 +1,6 @@
 import { TasteepTasting } from '../entities/tasteep-tasting.entity';
 import { UpsertTastingDto } from './dto/upsert-tasting.dto';
+import { signedPhotoUrl } from '../photos/photo-url';
 
 /** Wire shape of `lib/models/tasting.dart` — snake_case keys, ISO 8601 strings. */
 export interface TastingJson {
@@ -7,6 +8,13 @@ export interface TastingJson {
   name: string;
   category: TasteepTasting['category'];
   photo_path: string | null;
+  /**
+   * Read-only: signed URLs of the uploaded photo (full size, 480px thumbnail),
+   * or `null`. Load them without the bearer token; they stay valid for at
+   * least 24 h — on `403`, re-fetch the tasting for fresh ones.
+   */
+  photo_url: string | null;
+  photo_thumb_url: string | null;
   distillery: string | null;
   region: string | null;
   region_id: string | null;
@@ -42,6 +50,8 @@ export function toTastingJson(t: TasteepTasting): TastingJson {
     name: t.name,
     category: t.category,
     photo_path: t.photoPath ?? null,
+    photo_url: t.photoId ? signedPhotoUrl(t.photoId, 'full') : null,
+    photo_thumb_url: t.photoId ? signedPhotoUrl(t.photoId, 'thumb') : null,
     distillery: t.distillery ?? null,
     region: t.region ?? null,
     region_id: t.regionId ?? null,

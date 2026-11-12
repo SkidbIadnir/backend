@@ -70,11 +70,19 @@ export class TasteepTasting {
   category: TastingCategory;
 
   /**
-   * Photos stay on the user's device for now, so this is an opaque
-   * client-side path that is stored and echoed back verbatim.
+   * Opaque client-side path of the photo on the device, stored and echoed
+   * back verbatim so the app can show it offline.
    */
   @Column({ name: 'photo_path', type: 'text', nullable: true })
   photoPath: string | null;
+
+  /**
+   * The uploaded photo (`PUT /tasteep/tastings/:id/photo`), a server-generated
+   * id of the files in `PhotoStorageService`. A new upload gets a new id, so
+   * cached copies of the previous one are never served for it.
+   */
+  @Column({ name: 'photo_id', type: 'uuid', nullable: true })
+  photoId: string | null;
 
   @Column({ type: 'text', nullable: true })
   distillery: string | null;
