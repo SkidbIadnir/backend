@@ -89,6 +89,13 @@ export const tasteepConfig = {
     return (process.env.APP_URL ?? '').replace(/\/+$/, '');
   },
 
+  // --- Feedback ----------------------------------------------------------------
+  /** Feedback messages one user may send per rolling hour (default 5). */
+  get feedbackMaxPerHour(): number {
+    const n = parseInt(process.env.TASTEEP_FEEDBACK_MAX_PER_HOUR ?? '', 10);
+    return Number.isFinite(n) && n > 0 ? n : 5;
+  },
+
   // --- SMWS bottles scraper ----------------------------------------------------
   /** Nightly scrape of smws.eu. Manual runs from `/admin/smws` work either way. */
   get smwsScraperEnabled(): boolean {
