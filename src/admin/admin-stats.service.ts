@@ -80,9 +80,12 @@ export class AdminStatsService {
           WHERE distillery IS NOT NULL AND distillery <> ''
           GROUP BY distillery ORDER BY count DESC, distillery LIMIT 10`,
       ),
-      this.tastingRepo.query<[Row<'users'> & Row<'tastings'>]>(
+      this.tastingRepo.query<
+        [Row<'users'> & Row<'tastings'> & Row<'feedback_new'>]
+      >(
         `SELECT (SELECT COUNT(*) FROM tasteep_users) AS users,
-                (SELECT COUNT(*) FROM tasteep_tastings) AS tastings`,
+                (SELECT COUNT(*) FROM tasteep_tastings) AS tastings,
+                (SELECT COUNT(*) FROM tasteep_feedback WHERE status = 'new') AS feedback_new`,
       ),
     ]);
 
@@ -90,6 +93,7 @@ export class AdminStatsService {
       totals: {
         users: num(totals[0].users),
         tastings: num(totals[0].tastings),
+        feedback_new: num(totals[0].feedback_new),
       },
       users_by_provider: usersByProvider.map((r) => ({
         provider: r.provider,

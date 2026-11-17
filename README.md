@@ -46,9 +46,10 @@ src/
 │   │   ├── smws-bottles.service.ts      list, search, facets for the app; admin status
 │   │   └── smws-scrape.scheduler.ts     nightly cron
 │   ├── wishlist/            /tasteep/wishlist — folders and items
+│   ├── feedback/            /tasteep/feedback — user feedback (bug / idea / other), rate-limited per user
 │   └── test-utils/          Tasteep fixtures
 │
-└── admin/                   /admin/* dashboard API (stats, users, tastings, SMWS, codes, regions, logs)
+└── admin/                   /admin/* dashboard API (stats, users, tastings, SMWS, codes, regions, feedback, logs)
 
 docs/
 └── tasteep-api.md           full client contract for the Flutter app
@@ -110,6 +111,7 @@ check constraints on `category`, `location_precision`, `score`, indexes on
 | `GET` | `/tasteep/stats` | `{count, avg_score, distinct_distilleries}` |
 | `POST` | `/tasteep/geocode` | `{query}` → `{lat, lon, precision}` |
 | `GET` | `/tasteep/regions` | Country → subregion tree with centroids, ETag/304 |
+| `POST` | `/tasteep/feedback` | `{type, message, app_version?, platform?}` → `{id, created_at}`; 429 over the hourly limit |
 
 Request/response details, status codes and the location-precision rules are in
 [docs/tasteep-api.md](./docs/tasteep-api.md).
@@ -200,6 +202,21 @@ Schema changes to apply by hand in production:
 ```sql
 -- tasting photos
 ALTER TABLE tasteep_tastings ADD COLUMN IF NOT EXISTS photo_id uuid;
+
+-- user feedback
+CREATE TABLE IF NOT EXISTS tasteep_feedback (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES tasteep_users(id) ON DELETE CASCADE,
+  type text NOT NULL,
+  message text NOT NULL,
+  app_version text,
+  platform text,
+  status text NOT NULL DEFAULT 'new',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS tasteep_feedback_user_idx ON tasteep_feedback (user_id);
+CREATE INDEX IF NOT EXISTS tasteep_feedback_status_created_idx ON tasteep_feedback (status, created_at);
 ```
 
 ### Environment variables
@@ -223,6 +240,7 @@ ALTER TABLE tasteep_tastings ADD COLUMN IF NOT EXISTS photo_id uuid;
 | `TASTEEP_SMWS_USER_AGENT` | Tasteep | no | User-Agent sent to smws.eu |
 | `TASTEEP_PHOTOS_DIR` | Tasteep | in production | default `./data/photos`; `/data/photos` in the image. Must be a persistent volume |
 | `TASTEEP_PHOTO_URL_SECRET` | Tasteep | no | key for signing photo URLs; default derived from `TASTEEP_JWT_SECRET` |
+| `TASTEEP_FEEDBACK_MAX_PER_HOUR` | Tasteep | no | default `5`; feedback messages per user per rolling hour |
 
 ## Postman
 
