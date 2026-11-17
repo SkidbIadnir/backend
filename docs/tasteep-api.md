@@ -473,6 +473,38 @@ clients may call this freely; they should still store the result on the tasting 
 
 ---
 
+## Feedback
+
+`POST /tasteep/feedback` sends a bug report, an idea or any other message to the team. It is
+fire-and-forget: the user gets no reply or status through the API.
+
+```json
+{
+  "type": "bug",
+  "message": "The Atlas crashes when I zoom out on Islay",
+  "app_version": "1.4.0+42",
+  "platform": "ios"
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `type` | `"bug"` \| `"idea"` \| `"other"` | required |
+| `message` | string | required, 1–4000 characters, not blank; trimmed server-side |
+| `app_version` | string? | optional, ≤ 50 characters; send the app's version + build number |
+| `platform` | string? | optional, ≤ 50 characters, e.g. `ios`, `android` |
+
+| Status | Body |
+|---|---|
+| `201` | `{"id": "<uuid>", "created_at": "2026-11-17T10:00:00.000Z"}` |
+| `400` | unknown `type`, empty/blank or too-long `message` |
+| `401` | missing or invalid token |
+| `429` | the user already sent `TASTEEP_FEEDBACK_MAX_PER_HOUR` (default 5) messages in the last hour; show "try again later" |
+
+The app should fill `app_version` and `platform` itself rather than asking the user.
+
+---
+
 ## What the Flutter client needs to change
 
 1. **Email login is two steps.** `POST /auth/email` no longer resolves an `AuthUser`; it
@@ -491,3 +523,7 @@ clients may call this freely; they should still store the result on the tasting 
 6. **SMWS bottles.** `Tasting` gains `smws_sku` (nullable string; add it to `tasting.dart`
    and send it back on every PUT). Add the bottle picker and prefill to the new-tasting
    screen; see [Adding a tasting from an SMWS bottle](#adding-a-tasting-from-an-smws-bottle).
+7. **Feedback.** Add a "Send feedback" entry (e.g. in Profile/Settings): a type picker
+   (bug / idea / other) and a message field, posted to `POST /tasteep/feedback` with the app
+   version and platform. Show a thank-you on `201` and "try again later" on `429`. See
+   [Feedback](#feedback).

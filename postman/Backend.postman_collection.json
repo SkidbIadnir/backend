@@ -1764,6 +1764,114 @@
       ]
     },
     {
+      "name": "Tasteep — Feedback",
+      "description": "User feedback. Not part of `npm run test:postman`: each run stores real rows, and a user may only send TASTEEP_FEEDBACK_MAX_PER_HOUR (default 5) per hour.",
+      "item": [
+        {
+          "name": "Send Feedback",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"idea\",\n  \"message\": \"Postman: please add a dark mode\",\n  \"app_version\": \"1.4.0+42\",\n  \"platform\": \"ios\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/tasteep/feedback",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "feedback"
+              ]
+            },
+            "description": "Fire-and-forget bug report / idea / other message. `type` ∈ bug|idea|other, `message` 1–4000 chars. `201 {id, created_at}`; `429` past the hourly limit."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.test('exact shape', () => pm.expect(Object.keys(body).sort()).to.eql(['created_at', 'id']));",
+                  "pm.environment.set('feedback_id', body.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Send Feedback (Invalid — 400 expected)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"rant\",\n  \"message\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/tasteep/feedback",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "tasteep",
+                "feedback"
+              ]
+            },
+            "description": "Unknown `type` and empty `message`."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('lists both problems', () => pm.expect(pm.response.json().message).to.have.length.of.at.least(2));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{tasteep_token}}",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
       "name": "Admin (dashboard API)",
       "description": "Needs `admin_token`: a normal Tasteep bearer token for an account whose email is in the backend's ADMIN_EMAILS, from a session created within ADMIN_SESSION_MAX_HOURS (default 12h). Sign in via Tasteep — Auth, then paste the token here.",
       "auth": {
@@ -2607,6 +2715,97 @@
                 "exec": [
                   "pm.test('status is 200', () => pm.response.to.have.status(200));",
                   "pm.test('has regions', () => pm.expect(pm.response.json().regions).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List feedback",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/feedback?status=new&limit=50&offset=0",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "feedback"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "new"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "Newest first, with the author's email and display name. Optional filters: status (new|reviewed|archived), type (bug|idea|other), user_id."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('is a page', () => { const b = pm.response.json(); pm.expect(b.items).to.be.an('array'); pm.expect(b.total).to.be.a('number'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mark feedback reviewed",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"reviewed\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/feedback/{{feedback_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "feedback",
+                "{{feedback_id}}"
+              ]
+            },
+            "description": "Triage state only (new|reviewed|archived); the user never sees it. `feedback_id` is set by Tasteep — Feedback › Send Feedback."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('status updated', () => pm.expect(pm.response.json().status).to.eql('reviewed'));"
                 ]
               }
             }

@@ -11,6 +11,14 @@ import { AUTH_PROVIDERS } from '../../tasteep/entities/tasteep-user.entity';
 import type { AuthProvider } from '../../tasteep/entities/tasteep-user.entity';
 import { TASTING_CATEGORIES } from '../../tasteep/entities/tasteep-tasting.entity';
 import type { TastingCategory } from '../../tasteep/entities/tasteep-tasting.entity';
+import {
+  FEEDBACK_STATUSES,
+  FEEDBACK_TYPES,
+} from '../../tasteep/entities/tasteep-feedback.entity';
+import type {
+  FeedbackStatus,
+  FeedbackType,
+} from '../../tasteep/entities/tasteep-feedback.entity';
 import { LOG_LEVELS } from '../logging/log-buffer';
 import type { LogLevel } from '../logging/log-buffer';
 import { PaginationQueryDto, QueryBoolean } from './pagination.dto';
@@ -94,4 +102,18 @@ export class RegionsQueryDto {
   @IsOptional()
   @QueryBoolean()
   include_deleted?: boolean;
+}
+
+export class FeedbackQueryDto extends PaginationQueryDto {
+  @IsOptional()
+  @IsIn(FEEDBACK_STATUSES)
+  status?: FeedbackStatus;
+
+  @IsOptional()
+  @IsIn(FEEDBACK_TYPES)
+  type?: FeedbackType;
+
+  @IsOptional()
+  @IsUUID()
+  user_id?: string;
 }

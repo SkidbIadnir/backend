@@ -8,6 +8,10 @@ import type {
   LocationPrecision,
   TastingCategory,
 } from '../../tasteep/entities/tasteep-tasting.entity';
+import type {
+  FeedbackStatus,
+  FeedbackType,
+} from '../../tasteep/entities/tasteep-feedback.entity';
 import type { LogLevel } from '../logging/log-buffer';
 
 export class AdminSessionJson {
@@ -100,6 +104,8 @@ export class DistilleryCount {
 export class StatsTotals {
   users: number;
   tastings: number;
+  /** Feedback not yet triaged (`status = 'new'`). */
+  feedback_new: number;
 }
 export class ActiveSessions {
   last_7d: number;
@@ -306,4 +312,24 @@ export class AdminRegionNodeJson extends AdminRegionRowJson {
 }
 export class AdminRegionTreeJson extends AdminRegionNodeJson {
   subregions: AdminRegionNodeJson[];
+}
+
+export class AdminFeedbackJson {
+  id: string;
+  user_id: string;
+  /** Null when the account signed in without an email (e.g. some Discord accounts). */
+  user_email: string | null;
+  user_display_name: string | null;
+  type: FeedbackType;
+  message: string;
+  app_version: string | null;
+  platform: string | null;
+  status: FeedbackStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export class AdminFeedbackPage {
+  items: AdminFeedbackJson[];
+  total: number;
 }

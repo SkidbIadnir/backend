@@ -46,9 +46,10 @@ src/
 │   │   ├── smws-bottles.service.ts      list, search, facets for the app; admin status
 │   │   └── smws-scrape.scheduler.ts     nightly cron
 │   ├── wishlist/            /tasteep/wishlist — folders and items
+│   ├── feedback/            /tasteep/feedback — user feedback (bug / idea / other), rate-limited per user
 │   └── test-utils/          Tasteep fixtures
 │
-└── admin/                   /admin/* dashboard API (stats, users, tastings, SMWS, codes, regions, logs)
+└── admin/                   /admin/* dashboard API (stats, users, tastings, SMWS, codes, regions, feedback, logs)
 
 docs/
 └── tasteep-api.md           full client contract for the Flutter app
@@ -110,6 +111,7 @@ check constraints on `category`, `location_precision`, `score`, indexes on
 | `GET` | `/tasteep/stats` | `{count, avg_score, distinct_distilleries}` |
 | `POST` | `/tasteep/geocode` | `{query}` → `{lat, lon, precision}` |
 | `GET` | `/tasteep/regions` | Country → subregion tree with centroids, ETag/304 |
+| `POST` | `/tasteep/feedback` | `{type, message, app_version?, platform?}` → `{id, created_at}`; 429 over the hourly limit |
 
 Request/response details, status codes and the location-precision rules are in
 [docs/tasteep-api.md](./docs/tasteep-api.md).
@@ -195,12 +197,24 @@ Requirements: Node 20+, PostgreSQL 14+. Outside production (`NODE_ENV !== 'produ
 TypeORM `synchronize` creates and alters tables on boot; in production apply the schema
 yourself or run once with synchronize before switching the flag.
 
-Schema changes to apply by hand in production:
+Schema changes for production live in `scripts/db/`, one idempotent SQL file per change,
+applied in order to the database in `.env`:
 
-```sql
--- tasting photos
-ALTER TABLE tasteep_tastings ADD COLUMN IF NOT EXISTS photo_id uuid;
+```bash
+npm run db:apply -- scripts/db/002-tasteep-feedback.sql         # dry run (rolls back)
+npm run db:apply -- scripts/db/002-tasteep-feedback.sql --yes   # commit
 ```
+
+| File | Change |
+|---|---|
+| `001-tasting-photos.sql` | `tasteep_tastings.photo_id` |
+| `002-tasteep-feedback.sql` | `tasteep_feedback` table |
+
+When you change an entity, add the next numbered file next to them.
+
+**Careful:** outside production, `synchronize` alters whatever database `.env` points at on
+every boot (and in e2e runs). If `.env` targets the shared database, entity changes reach it
+as soon as you start the app.
 
 ### Environment variables
 
@@ -223,6 +237,7 @@ ALTER TABLE tasteep_tastings ADD COLUMN IF NOT EXISTS photo_id uuid;
 | `TASTEEP_SMWS_USER_AGENT` | Tasteep | no | User-Agent sent to smws.eu |
 | `TASTEEP_PHOTOS_DIR` | Tasteep | in production | default `./data/photos`; `/data/photos` in the image. Must be a persistent volume |
 | `TASTEEP_PHOTO_URL_SECRET` | Tasteep | no | key for signing photo URLs; default derived from `TASTEEP_JWT_SECRET` |
+| `TASTEEP_FEEDBACK_MAX_PER_HOUR` | Tasteep | no | default `5`; feedback messages per user per rolling hour |
 
 ## Postman
 

@@ -6,6 +6,7 @@ import { SmwsCodesModule } from '../tasteep/smws-codes/smws-codes.module';
 import { SmwsBottlesModule } from '../tasteep/smws-bottles/smws-bottles.module';
 import { GeocodeModule } from '../tasteep/geocode/geocode.module';
 import { RegionsModule } from '../tasteep/regions/regions.module';
+import { TasteepFeedback } from '../tasteep/entities/tasteep-feedback.entity';
 import { TasteepEmailOtp } from '../tasteep/entities/tasteep-email-otp.entity';
 import { TasteepGeocodeCache } from '../tasteep/entities/tasteep-geocode-cache.entity';
 import { TasteepSession } from '../tasteep/entities/tasteep-session.entity';
@@ -14,6 +15,8 @@ import { TasteepUser } from '../tasteep/entities/tasteep-user.entity';
 import { adminConfig } from './admin-config';
 import { AdminAuditService } from './admin-audit.service';
 import { AdminGuard } from './admin-auth.guard';
+import { AdminFeedbackController } from './admin-feedback.controller';
+import { AdminFeedbackService } from './admin-feedback.service';
 import { AdminDistilleryLocationsController } from './admin-distillery-locations.controller';
 import { AdminLogsController } from './admin-logs.controller';
 import { AdminRegionsController } from './admin-regions.controller';
@@ -36,6 +39,7 @@ import { ADMIN_LOG_BUFFER, logBuffer } from './logging/log-buffer';
       TasteepTasting,
       TasteepEmailOtp,
       TasteepGeocodeCache,
+      TasteepFeedback,
     ]),
     // Scoped to this module: only the admin controllers use ThrottlerGuard.
     ThrottlerModule.forRoot([
@@ -56,6 +60,7 @@ import { ADMIN_LOG_BUFFER, logBuffer } from './logging/log-buffer';
     AdminDistilleryLocationsController,
     AdminRegionsController,
     AdminLogsController,
+    AdminFeedbackController,
   ],
   providers: [
     AdminGuard,
@@ -64,6 +69,7 @@ import { ADMIN_LOG_BUFFER, logBuffer } from './logging/log-buffer';
     AdminUsersService,
     AdminTastingsService,
     AdminSmwsService,
+    AdminFeedbackService,
     { provide: ADMIN_LOG_BUFFER, useValue: logBuffer },
   ],
 })
