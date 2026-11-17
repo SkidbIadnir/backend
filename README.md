@@ -197,27 +197,24 @@ Requirements: Node 20+, PostgreSQL 14+. Outside production (`NODE_ENV !== 'produ
 TypeORM `synchronize` creates and alters tables on boot; in production apply the schema
 yourself or run once with synchronize before switching the flag.
 
-Schema changes to apply by hand in production:
+Schema changes for production live in `scripts/db/`, one idempotent SQL file per change,
+applied in order to the database in `.env`:
 
-```sql
--- tasting photos
-ALTER TABLE tasteep_tastings ADD COLUMN IF NOT EXISTS photo_id uuid;
-
--- user feedback
-CREATE TABLE IF NOT EXISTS tasteep_feedback (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL REFERENCES tasteep_users(id) ON DELETE CASCADE,
-  type text NOT NULL,
-  message text NOT NULL,
-  app_version text,
-  platform text,
-  status text NOT NULL DEFAULT 'new',
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS tasteep_feedback_user_idx ON tasteep_feedback (user_id);
-CREATE INDEX IF NOT EXISTS tasteep_feedback_status_created_idx ON tasteep_feedback (status, created_at);
+```bash
+npm run db:apply -- scripts/db/002-tasteep-feedback.sql         # dry run (rolls back)
+npm run db:apply -- scripts/db/002-tasteep-feedback.sql --yes   # commit
 ```
+
+| File | Change |
+|---|---|
+| `001-tasting-photos.sql` | `tasteep_tastings.photo_id` |
+| `002-tasteep-feedback.sql` | `tasteep_feedback` table |
+
+When you change an entity, add the next numbered file next to them.
+
+**Careful:** outside production, `synchronize` alters whatever database `.env` points at on
+every boot (and in e2e runs). If `.env` targets the shared database, entity changes reach it
+as soon as you start the app.
 
 ### Environment variables
 
