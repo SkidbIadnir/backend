@@ -146,7 +146,7 @@ jobs:
           echo "$IMAGE:$BRANCH → tree-$TREE (commit $GITHUB_SHA)" | tee -a "$GITHUB_STEP_SUMMARY"
 
   deploy:
-    name: Deploy ${{ github.ref_name }}
+    name: Deploy
     needs: image
     runs-on: ubuntu-latest
     timeout-minutes: 25
