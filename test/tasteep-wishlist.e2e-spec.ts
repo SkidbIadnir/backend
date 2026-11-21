@@ -12,7 +12,6 @@ import { AppModule } from '../src/app.module';
 import { TasteepSession } from '../src/tasteep/entities/tasteep-session.entity';
 import { TasteepTasting } from '../src/tasteep/entities/tasteep-tasting.entity';
 import { TasteepUser } from '../src/tasteep/entities/tasteep-user.entity';
-import { TasteepWishlistFolder } from '../src/tasteep/entities/tasteep-wishlist-folder.entity';
 import { TasteepWishlistItem } from '../src/tasteep/entities/tasteep-wishlist-item.entity';
 import type {
   WishlistFolderJson,
@@ -31,7 +30,13 @@ jest.setTimeout(30_000);
 
 const RUN = randomUUID().slice(0, 8);
 
-const FOLDER_KEYS = ['id', 'name', 'sort_order', 'created_at', 'updated_at'].sort();
+const FOLDER_KEYS = [
+  'id',
+  'name',
+  'sort_order',
+  'created_at',
+  'updated_at',
+].sort();
 const ITEM_KEYS = [
   'id',
   'folder_id',
@@ -54,7 +59,6 @@ describe('Tasteep wish list (e2e)', () => {
   let http: App;
   let users: Repository<TasteepUser>;
   let sessions: Repository<TasteepSession>;
-  let folders: Repository<TasteepWishlistFolder>;
   let items: Repository<TasteepWishlistItem>;
   let tastings: Repository<TasteepTasting>;
 
@@ -71,7 +75,8 @@ describe('Tasteep wish list (e2e)', () => {
 
   const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
   const folder = (res: request.Response) => res.body as WishlistFolderJson;
-  const folderList = (res: request.Response) => res.body as WishlistFolderJson[];
+  const folderList = (res: request.Response) =>
+    res.body as WishlistFolderJson[];
   const item = (res: request.Response) => res.body as WishlistItemJson;
   const itemList = (res: request.Response) => res.body as WishlistItemJson[];
   const errorMessage = (res: request.Response) =>
@@ -140,7 +145,6 @@ describe('Tasteep wish list (e2e)', () => {
 
     users = app.get(getRepositoryToken(TasteepUser));
     sessions = app.get(getRepositoryToken(TasteepSession));
-    folders = app.get(getRepositoryToken(TasteepWishlistFolder));
     items = app.get(getRepositoryToken(TasteepWishlistItem));
     tastings = app.get(getRepositoryToken(TasteepTasting));
 
@@ -275,7 +279,13 @@ describe('Tasteep wish list (e2e)', () => {
       const res = await request(http)
         .put(`/tasteep/wishlist/items/${randomUUID()}`)
         .set(auth(alice.token))
-        .send(itemBody({ name: 'Tanqueray Malacca', folder_id: null, category: 'gin' }))
+        .send(
+          itemBody({
+            name: 'Tanqueray Malacca',
+            folder_id: null,
+            category: 'gin',
+          }),
+        )
         .expect(200);
       expect(item(res).category).toBe('gin');
 
@@ -340,7 +350,7 @@ describe('Tasteep wish list (e2e)', () => {
       });
     });
 
-    it("rejects a fulfilled_tasting_id that is not mine", async () => {
+    it('rejects a fulfilled_tasting_id that is not mine', async () => {
       const bobsTasting = randomUUID();
       await request(http)
         .put(`/tasteep/tastings/${bobsTasting}`)
@@ -351,7 +361,9 @@ describe('Tasteep wish list (e2e)', () => {
       const res = await request(http)
         .put(`/tasteep/wishlist/items/${karuizawa}`)
         .set(auth(alice.token))
-        .send(itemBody({ fulfilled_tasting_id: bobsTasting, folder_id: someday }))
+        .send(
+          itemBody({ fulfilled_tasting_id: bobsTasting, folder_id: someday }),
+        )
         .expect(400);
       expect(errorMessage(res)).toMatch(/fulfilled_tasting_id/);
 
