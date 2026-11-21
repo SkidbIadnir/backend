@@ -1,28 +1,42 @@
-# Use Node.js 20 LTS as the base image
-FROM node:20-bookworm
+# ── Build stage: full toolchain, dev dependencies, compile, then drop dev deps ──
+FROM node:20-bookworm AS build
 
-# Set the working directory
 WORKDIR /app
 
-# Copy package.json and package-lock.json
 COPY package*.json ./
+RUN npm ci
 
-# Install dependencies
-RUN npm install
-
-# Copy the rest of the application code
 COPY . .
+RUN npm run build && npm prune --omit=dev
 
-# Build the application
-RUN npm run build
+# ── Runtime stage ───────────────────────────────────────────────────────────────
+# Debian slim (glibc), not Alpine: sharp ships prebuilt glibc binaries.
+FROM node:20-bookworm-slim
 
-# Tasting photos. Mount a persistent volume here (see README "Docker / CI"),
-# otherwise uploads are lost when the container is replaced.
+WORKDIR /app
+
+# Safe default: TypeORM `synchronize` stays off unless the environment sets
+# NODE_ENV to something else (dev does, through its Coolify variables).
+ENV NODE_ENV=production
+
+COPY --from=build /app/package*.json ./
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+# Schema scripts, applied from inside the container on preprod/prod:
+#   node scripts/db/apply-sql.mjs scripts/db/NNN-x.sql [--yes]
+COPY --from=build /app/scripts/db ./scripts/db
+
+# Tasting photos. Mount a persistent volume here, otherwise uploads are lost
+# when the container is replaced. The process runs as root for now: the
+# existing Coolify photo volumes are owned by root.
 ENV TASTEEP_PHOTOS_DIR=/data/photos
 RUN mkdir -p /data/photos
 
-# Expose the port
 EXPOSE 3000
 
-# Start the application
+# GET /health runs `SELECT 1`: unhealthy when the app or its database is down.
+# The slim image has no curl, so Node's own fetch does the request.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+
 CMD ["node", "dist/main"]
