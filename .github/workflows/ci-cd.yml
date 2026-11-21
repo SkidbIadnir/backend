@@ -1,50 +1,245 @@
-name: CI/CD Pipeline
+# Three-environment pipeline (see CLAUDE.md "Build & deploy").
+#
+#   PR into dev/preprod/prod  → checks + e2e, deploys nothing
+#   push to dev/preprod/prod  → checks, image (build once per git tree), deploy
+#   workflow_dispatch         → same as push, for the selected branch
+#
+# Images: ghcr.io/<owner>/backend:tree-<git tree hash> (immutable) plus a
+# moving tag per branch (:dev, :preprod, :prod) that Coolify deploys.
+name: CI/CD
 
 on:
+  pull_request:
+    branches: [dev, preprod, prod]
+    paths-ignore: ['**/*.md', 'docs/**', 'postman/**']
   push:
-    branches:
-      - master # Run the workflow on pushes to the master branch
+    branches: [dev, preprod, prod]
+    paths-ignore: ['**/*.md', 'docs/**', 'postman/**']
+  workflow_dispatch:
+
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
 
 jobs:
-  build-and-push:
-    name: Build, Test, and Push Docker Image
+  checks:
+    name: Lint, build, unit tests
     runs-on: ubuntu-latest
-
+    timeout-minutes: 15
     steps:
-      # Step 1: Check out the code
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20 # same as the Dockerfile
+          cache: npm
+      - run: npm ci
+      - run: npm run lint:check # `npm run lint` uses --fix
+      - run: npm run build
+      - run: npm test
 
-      # Step 2: Set up Node.js
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+  e2e:
+    name: E2E tests (Postgres 18)
+    if: github.event_name == 'pull_request'
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: tasteep
+          POSTGRES_PASSWORD: tasteep
+          POSTGRES_DB: tasteep_e2e
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U tasteep -d tasteep_e2e"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      NODE_ENV: test # TypeORM synchronize creates the schema in the empty DB
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: tasteep
+      POSTGRES_PASSWORD: tasteep
+      POSTGRES_DB: tasteep_e2e
+      TASTEEP_JWT_SECRET: e2e-throwaway-${{ github.run_id }}
+      TASTEEP_SMWS_SCRAPER_ENABLED: 'false'
+      # Nominatim is stubbed in the suites; point the real client nowhere anyway.
+      TASTEEP_NOMINATIM_USER_AGENT: tasteep-ci-e2e
+      TASTEEP_NOMINATIM_URL: http://127.0.0.1:9
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: npm
+      - run: npm ci
+      - run: npm run test:e2e
 
-      # Step 3: Install dependencies
-      - name: Install dependencies
-        run: npm install
+  image:
+    name: Image (build once per tree)
+    if: >-
+      github.event_name != 'pull_request' &&
+      contains(fromJSON('["dev","preprod","prod"]'), github.ref_name)
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
 
-      # Step 4: Run tests
-      - name: Run tests
-        run: npm test
+      - name: Compute image name and tree hash
+        id: meta
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}" # GHCR names must be lowercase
+          echo "image=ghcr.io/${owner}/backend" >> "$GITHUB_OUTPUT"
+          echo "tree=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
 
-      # Step 5: Set up Docker Buildx (for multi-platform builds if needed)
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
-      # Step 6: Log in to GitHub Container Registry
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
-          username: ${{ secrets.GHCR_USERNAME }}
-          password: ${{ secrets.GHCR_TOKEN }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Step 7: Build and push Docker image
-      - name: Build and Push Docker Image
-        uses: docker/build-push-action@v5
+      - name: Look for an image of this tree
+        id: existing
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+          TREE: ${{ steps.meta.outputs.tree }}
+        run: |
+          if docker manifest inspect "$IMAGE:tree-$TREE" > /dev/null 2>&1; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "Reusing $IMAGE:tree-$TREE (same code already built), skipping the build." | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and push tree-${{ steps.meta.outputs.tree }}
+        if: steps.existing.outputs.found != 'true'
+        uses: docker/build-push-action@v7
         with:
+          context: .
           push: true
-          tags: ghcr.io/${{ secrets.GHCR_REPOSITORY }}:latest
+          provenance: false
+          tags: ${{ steps.meta.outputs.image }}:tree-${{ steps.meta.outputs.tree }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Point :${{ github.ref_name }} at this tree
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+          TREE: ${{ steps.meta.outputs.tree }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          docker buildx imagetools create -t "$IMAGE:$BRANCH" "$IMAGE:tree-$TREE"
+          echo "$IMAGE:$BRANCH → tree-$TREE (commit $GITHUB_SHA)" | tee -a "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Deploy ${{ github.ref_name }}
+    needs: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Pick the environment's public URL
+        id: target
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          case "$BRANCH" in
+            dev)     url=https://api.dev.tasteep.eu ;;
+            preprod) url=https://api.preprod.tasteep.eu ;;
+            prod)    url=https://api.tasteep.eu ;;
+            *) echo "::error::No environment for branch $BRANCH"; exit 1 ;;
+          esac
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      # Coolify is only reachable on the tailnet: join it for this job only
+      # (ephemeral node, removed when the job ends).
+      - uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      # Coolify v4.7 API: POST /api/v1/deploy (GET only answers "POST required"),
+      # then GET /api/v1/deployments/{deployment_uuid} until it settles.
+      # Statuses: queued, in_progress, finished, failed, cancelled-by-user.
+      - name: Deploy on Coolify and wait for it
+        env:
+          BRANCH: ${{ github.ref_name }}
+          COOLIFY_URL: ${{ secrets.COOLIFY_URL }}
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+          UUID_DEV: ${{ secrets.COOLIFY_UUID_DEV }}
+          UUID_PREPROD: ${{ secrets.COOLIFY_UUID_PREPROD }}
+          UUID_PROD: ${{ secrets.COOLIFY_UUID_PROD }}
+        run: |
+          set -euo pipefail
+          case "$BRANCH" in
+            dev)     uuid="$UUID_DEV" ;;
+            preprod) uuid="$UUID_PREPROD" ;;
+            prod)    uuid="$UUID_PROD" ;;
+          esac
+          if [ -z "$uuid" ] || [ -z "$COOLIFY_URL" ] || [ -z "$COOLIFY_TOKEN" ]; then
+            echo "::error::Missing COOLIFY_URL, COOLIFY_TOKEN or the resource UUID secret for $BRANCH."
+            exit 1
+          fi
+          api="${COOLIFY_URL%/}/api"
+          auth="Authorization: Bearer $COOLIFY_TOKEN"
+
+          # Peers see the new tailnet node with a short delay.
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 5 -o /dev/null "$api/health"; then break; fi
+            if [ "$i" = 30 ]; then echo "::error::Coolify is not reachable over the tailnet."; exit 1; fi
+            sleep 5
+          done
+
+          body=$(mktemp)
+          code=$(curl -sS --max-time 30 -o "$body" -w '%{http_code}' -X POST -H "$auth" \
+            "$api/v1/deploy?uuid=$uuid&force=false")
+          if [ "$code" != 200 ]; then
+            echo "::error::Coolify deploy request failed (HTTP $code): $(jq -r '.message // empty' "$body" 2>/dev/null)"
+            exit 1
+          fi
+          deployment=$(jq -r '.deployments[0].deployment_uuid // empty' "$body")
+          if [ -z "$deployment" ]; then
+            echo "::error::Coolify did not queue a deployment: $(jq -r '.deployments[0].message // .message // empty' "$body")"
+            exit 1
+          fi
+          echo "Coolify deployment $deployment queued."
+
+          deadline=$((SECONDS + 900))
+          last=""
+          while :; do
+            status=$(curl -fsS --max-time 15 -H "$auth" "$api/v1/deployments/$deployment" | jq -r '.status // empty') || status=""
+            if [ -n "$status" ] && [ "$status" != "$last" ]; then echo "status: $status"; last="$status"; fi
+            case "$status" in
+              finished) break ;;
+              failed|cancelled*) echo "::error::Coolify deployment $deployment ended with status '$status'. See its logs in Coolify."; exit 1 ;;
+            esac
+            if [ "$SECONDS" -ge "$deadline" ]; then echo "::error::Coolify deployment $deployment still '$status' after 15 minutes."; exit 1; fi
+            sleep 10
+          done
+
+      - name: Smoke test ${{ steps.target.outputs.url }}/health
+        env:
+          URL: ${{ steps.target.outputs.url }}
+        run: |
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$URL/health" || true)
+            if [ "$code" = 200 ]; then echo "$URL/health → 200"; exit 0; fi
+            echo "attempt $i: HTTP $code"
+            sleep 5
+          done
+          echo "::error::$URL/health did not answer 200."
+          exit 1
