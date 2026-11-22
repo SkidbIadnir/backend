@@ -152,9 +152,7 @@ export class SmwsCodesService implements OnModuleInit {
    * after `RegionsService.seed` (this module imports `RegionsModule`, and
    * Nest initialises imported modules first), so `region_id` can resolve.
    */
-  async seed(
-    file: SmwsCodeSeedFile = smwsCodeData as unknown as SmwsCodeSeedFile,
-  ): Promise<number> {
+  async seed(file: SmwsCodeSeedFile = smwsCodeData): Promise<number> {
     const existing = new Set(
       (await this.repo.find({ select: { code: true }, withDeleted: true })).map(
         (r) => r.code,
@@ -306,9 +304,7 @@ export class SmwsCodesService implements OnModuleInit {
    * Table vs seed file. `only_in_json` codes will be inserted on the next
    * boot; `deleted_in_table` ones won't (they were deleted on purpose).
    */
-  async diff(
-    file: SmwsCodeSeedFile = smwsCodeData as unknown as SmwsCodeSeedFile,
-  ) {
+  async diff(file: SmwsCodeSeedFile = smwsCodeData) {
     const json = seedRows(file);
     const rows = await this.repo.find({ withDeleted: true });
     const byCode = new Map(rows.map((r) => [r.code, r]));

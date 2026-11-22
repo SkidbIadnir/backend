@@ -13,6 +13,7 @@ One NestJS process, one PostgreSQL database:
 src/
 ├── app.module.ts            TypeORM root (autoLoadEntities) + the two project modules
 ├── main.ts                  CORS, global ValidationPipe (whitelist)
+├── health/                  GET /health — liveness + `SELECT 1`, for Docker, CI and uptime checks
 ├── test-utils/              generic jest mocks (repository / query-builder)
 │
 ├── tasteep/
@@ -93,6 +94,7 @@ check constraints on `category`, `location_precision`, `score`, indexes on
 
 | Method | Path | Purpose |
 |---|---|---|
+| `GET` | `/health` | No token. `200 {"status":"ok"}`, or `503` when the database does not answer |
 | `POST` | `/auth/email` | Send login code |
 | `POST` | `/auth/email/verify` | Exchange code for `AuthUser` |
 | `POST` | `/auth/google` | Google ID-token login |
@@ -193,17 +195,19 @@ cp .env.example .env   # fill in — every variable is documented in the file
 npm run start:dev
 ```
 
-Requirements: Node 20+, PostgreSQL 14+. Outside production (`NODE_ENV !== 'production'`)
-TypeORM `synchronize` creates and alters tables on boot; in production apply the schema
-yourself or run once with synchronize before switching the flag.
+Requirements: Node 20 (same as the Docker image and CI), PostgreSQL 14+ (the servers run 18).
+Outside production (`NODE_ENV !== 'production'`) TypeORM `synchronize` creates and alters
+tables on boot; preprod and prod run with `NODE_ENV=production`, so it is off there.
 
-Schema changes for production live in `scripts/db/`, one idempotent SQL file per change,
-applied in order to the database in `.env`:
+Schema changes for preprod and prod live in `scripts/db/`, one idempotent SQL file per change.
+The script reads `POSTGRES_*` from the environment, then from `.env` if there is one:
 
 ```bash
 npm run db:apply -- scripts/db/002-tasteep-feedback.sql         # dry run (rolls back)
 npm run db:apply -- scripts/db/002-tasteep-feedback.sql --yes   # commit
 ```
+
+On preprod and prod, run it from inside the backend container (see [Deployment](#deployment)).
 
 | File | Change |
 |---|---|
@@ -221,12 +225,12 @@ as soon as you start the app.
 | Variable | Project | Required | Notes |
 |---|---|---|---|
 | `POSTGRES_HOST/PORT/DB/USER/PASSWORD` | shared | yes | |
-| `APP_URL` | shared | yes | Public base URL, used for OAuth callbacks |
+| `APP_URL` | shared | yes | Public origin of the API (e.g. `https://api.tasteep.eu`), prefixed to signed photo URLs |
 | `PORT` | shared | no | default 3000 |
-| `FRONTEND_URL` | shared | no | CORS origins, comma-separated |
-| `TASTEEP_JWT_SECRET` | Tasteep | yes | falls back to `JWT_SECRET` |
+| `FRONTEND_URL` | shared | for the web app / admin | CORS origins, comma-separated, exact (`https://…`, no trailing slash) |
+| `TASTEEP_JWT_SECRET` | Tasteep | yes | falls back to legacy `JWT_SECRET`; startup fails if neither is set |
 | `TASTEEP_JWT_EXPIRES_IN` | Tasteep | no | default `365d` |
-| `TASTEEP_SMTP_HOST/PORT/SECURE/USER/PASS/FROM` | Tasteep | no | unset → OTP logged to console |
+| `TASTEEP_SMTP_HOST/PORT/SECURE/USER/PASS/FROM` | Tasteep | no | host unset → OTP logged to console; host set → `USER` and `PASS` required (startup fails otherwise) |
 | `TASTEEP_OTP_TTL_MINUTES` / `_MAX_ATTEMPTS` / `_RESEND_COOLDOWN_SECONDS` | Tasteep | no | 10 / 5 / 60 |
 | `TASTEEP_GOOGLE_CLIENT_IDS` | Tasteep | for Google login | comma-separated |
 | `TASTEEP_DISCORD_CLIENT_ID/SECRET/REDIRECT_URI` | Tasteep | for Discord login | |
@@ -256,9 +260,10 @@ bearer token into the environment automatically, so every other Tasteep request 
 ## Development
 
 ```bash
-npm run test        # unit tests (jest, no database needed)
+npm run test         # unit tests (jest, no database needed)
 npm run test:cov
-npm run lint
+npm run lint         # ESLint with --fix (rewrites files)
+npm run lint:check   # ESLint + prettier --check, no writes (what CI runs)
 npm run build
 ```
 
@@ -272,7 +277,18 @@ rules, the stats parsing, the geocode cache and the rate limiter.
 npm run test:e2e
 ```
 
-`test/tasteep.e2e-spec.ts` boots the real app against the database in `.env` and drives the
+CI runs it on every pull request against an empty `postgres:18` service. Locally it uses the
+database in `.env` unless `POSTGRES_*` are set in the shell, so the safest run is against a
+throw-away container:
+
+```bash
+docker run -d --rm --name pg-e2e -e POSTGRES_PASSWORD=e2e -p 55432:5432 postgres:18
+POSTGRES_HOST=127.0.0.1 POSTGRES_PORT=55432 POSTGRES_USER=postgres POSTGRES_PASSWORD=e2e \
+  POSTGRES_DB=postgres TASTEEP_JWT_SECRET=e2e TASTEEP_SMTP_HOST= npm run test:e2e
+```
+
+The suites share one database, so the script runs them serially (`--runInBand`).
+`test/tasteep.e2e-spec.ts` boots the real app against that database and drives the
 whole Tasteep contract over HTTP — JWT guard, validation pipe, list ordering, the unplaced
 shelf, stats SQL, the manual-pin rules and the geocode cache. Only Nominatim is
 stubbed (its usage policy forbids automated querying). The suite creates throw-away users and
@@ -300,31 +316,70 @@ The first run geocodes "Islay, Scotland" through Nominatim for real (needs
 To exercise the flow by hand against a throw-away database instead:
 
 ```bash
-docker run -d --rm --name pg -e POSTGRES_PASSWORD=dev -p 5432:5432 postgres:16-alpine
+docker run -d --rm --name pg -e POSTGRES_PASSWORD=dev -p 5432:5432 postgres:18
 POSTGRES_PASSWORD=dev TASTEEP_JWT_SECRET=dev APP_URL=http://localhost:3000 npm run start:dev
 curl -X POST localhost:3000/auth/email -H 'content-type: application/json' -d '{"email":"you@example.com"}'
 ```
 
-## Docker / CI
+## Deployment
+
+Three environments, each with its own Postgres 18 database and its own secrets, run on one
+server managed with Coolify (private, reachable only on the Tailscale tailnet):
+
+| Branch | Environment | API |
+|---|---|---|
+| `dev` | dev | `https://api.dev.tasteep.eu` |
+| `preprod` | preprod | `https://api.preprod.tasteep.eu` |
+| `prod` | prod | `https://api.tasteep.eu` |
+
+`master` is not deployed: it only receives `prod` at major versions (tag `vX.0.0`).
+
+`.github/workflows/ci-cd.yml`:
+
+- **Pull request** into `dev`, `preprod` or `prod`: `npm run lint:check`, build, unit tests,
+  then the e2e suite against a `postgres:18` service. Nothing is deployed.
+- **Push** to one of those branches (or a manual run): the same checks, then the image, then
+  the deploy.
+  - The image is `ghcr.io/skidbiadnir/backend:tree-<git tree hash>`. When an image of that
+    exact tree already exists, the build is skipped. A promotion PR (`dev` → `preprod` →
+    `prod`) with no other change has the same tree, so preprod and prod run the very image
+    tested on dev.
+  - The moving tag `:dev` / `:preprod` / `:prod` is pointed at it, then CI joins the tailnet
+    (Tailscale GitHub Action, ephemeral `tag:ci` node), asks Coolify to redeploy that
+    environment, waits for the deployment to finish, and checks `GET /health` on the public
+    URL.
+- Docs-only changes (`**/*.md`, `docs/**`, `postman/**`) do not trigger it.
+
+Runtime variables live in Coolify, not GitHub. The repository secrets are `TS_OAUTH_CLIENT_ID`,
+`TS_OAUTH_SECRET`, `COOLIFY_URL`, `COOLIFY_TOKEN` and `COOLIFY_UUID_DEV` / `_PREPROD` / `_PROD`.
+
+**Schema changes:** preprod and prod run with `synchronize` off. Before merging a promotion
+PR that adds a `scripts/db` file, apply it to the target environment from Coolify → that
+environment's backend → **Terminal**:
+
+```bash
+node scripts/db/apply-sql.mjs scripts/db/NNN-x.sql         # dry run
+node scripts/db/apply-sql.mjs scripts/db/NNN-x.sql --yes   # commit
+```
+
+**Photos:** each backend has a persistent volume on `/data/photos`. The files are not in
+Postgres, so back that volume up together with the database dump, off the server. Uploads
+can be up to 20 MB; Coolify's Traefik sets no body limit by default.
+
+To run the image locally:
 
 ```bash
 docker build -t backend .
-docker run -p 3000:3000 --env-file .env -v /srv/tasteep/photos:/data/photos backend
+docker run -p 3000:3000 --env-file .env -v "$PWD/data/photos:/data/photos" backend
 ```
 
-The `-v` mount is what keeps uploaded photos across redeploys: without it they live in the
-container and disappear with it. The photos directory is not in Postgres, so back it up
-alongside the database dump (e.g. a nightly `restic backup /srv/tasteep/photos` to off-site
-storage).
-
-`.github/workflows/ci-cd.yml` runs `npm test`, then builds and pushes the image to `ghcr.io`
-on every push to `master`.
+The image defaults to `NODE_ENV=production` and has a `HEALTHCHECK` on `/health`.
 
 ## Decisions & open items
 
 - Email login = OTP code (no deep link needed on mobile). Tokens = long-lived JWT + revocable
   `tasteep_sessions` row. Google = ID-token verification, Discord = server-side code exchange.
-- Photos are stored on the VPS disk (one per tasting), served via signed URLs rather than the
+- Photos are stored on the server's disk (one per tasting), served via signed URLs rather than the
   bearer token because Flutter web's `Image.network` cannot send one. Swap
   `PhotoStorageService` for object storage if the disk ever becomes the limit.
 - `?unplaced=true` on the list endpoint was chosen over a separate `/unplaced` route.

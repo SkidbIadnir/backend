@@ -61,6 +61,8 @@ const TASTING_KEYS = [
   'lat',
   'lon',
   'location_precision',
+  'smws_sku',
+  'smws_label',
   'created_at',
   'updated_at',
 ].sort();

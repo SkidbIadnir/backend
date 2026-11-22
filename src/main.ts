@@ -38,4 +38,4 @@ async function bootstrap() {
   // an Android emulator's 10.0.2.2 alias forwards IPv4 only and gets refused.
   await app.listen(process.env.PORT ?? 3000, '0.0.0.0');
 }
-bootstrap();
+void bootstrap();

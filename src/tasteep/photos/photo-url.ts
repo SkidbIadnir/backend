@@ -22,13 +22,7 @@ export function photoUrlExpiry(nowMs: number = Date.now()): number {
 function signingKey(): string {
   const explicit = tasteepConfig.photoUrlSecret;
   if (explicit) return explicit;
-  const jwtSecret = tasteepConfig.jwtSecret;
-  if (!jwtSecret) {
-    throw new Error(
-      'Set TASTEEP_PHOTO_URL_SECRET or TASTEEP_JWT_SECRET to sign photo URLs.',
-    );
-  }
-  return createHmac('sha256', jwtSecret)
+  return createHmac('sha256', tasteepConfig.jwtSecret)
     .update('tasteep-photo-urls')
     .digest('hex');
 }

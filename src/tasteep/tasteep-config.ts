@@ -3,8 +3,20 @@
  * `TASTEEP_*` (see `.env.example`).
  */
 export const tasteepConfig = {
+  /**
+   * Signs and verifies bearer tokens (and, by default, OTP hashes and photo
+   * URLs). `TASTEEP_JWT_SECRET` is the canonical name; legacy `JWT_SECRET` is
+   * used when it is unset or empty. Throws when neither is set, so a
+   * misconfigured deploy fails at startup instead of on the first request.
+   */
   get jwtSecret(): string {
-    return (process.env.TASTEEP_JWT_SECRET ?? process.env.JWT_SECRET) as string;
+    const secret = process.env.TASTEEP_JWT_SECRET || process.env.JWT_SECRET;
+    if (!secret) {
+      throw new Error(
+        'No JWT secret configured: set TASTEEP_JWT_SECRET (or the legacy JWT_SECRET).',
+      );
+    }
+    return secret;
   },
   /** Lifetime of an issued bearer token. Sessions are revocable server-side regardless. */
   get jwtExpiresIn(): string {
@@ -48,15 +60,32 @@ export const tasteepConfig = {
   },
 
   // --- Mail (SMTP) -------------------------------------------------------------
+  /**
+   * `null` when `TASTEEP_SMTP_HOST` is unset (dev mode: OTPs are logged).
+   * Once a host is set, the user and password are required: throws when
+   * either is missing, rather than failing later at send time with `530`.
+   */
   get smtp() {
     const host = process.env.TASTEEP_SMTP_HOST;
     if (!host) return null;
+    const user = process.env.TASTEEP_SMTP_USER;
+    const pass = process.env.TASTEEP_SMTP_PASS;
+    const missing = [
+      !user && 'TASTEEP_SMTP_USER',
+      !pass && 'TASTEEP_SMTP_PASS',
+    ].filter(Boolean);
+    if (missing.length) {
+      throw new Error(
+        `TASTEEP_SMTP_HOST is set but ${missing.join(' and ')} ${missing.length > 1 ? 'are' : 'is'} missing. ` +
+          'Set them, or unset TASTEEP_SMTP_HOST to log OTP codes instead of emailing them.',
+      );
+    }
     return {
       host,
       port: parseInt(process.env.TASTEEP_SMTP_PORT ?? '587', 10),
       secure: process.env.TASTEEP_SMTP_SECURE === 'true',
-      user: process.env.TASTEEP_SMTP_USER,
-      pass: process.env.TASTEEP_SMTP_PASS,
+      user: user as string,
+      pass: pass as string,
       from: process.env.TASTEEP_SMTP_FROM ?? 'Tasteep <no-reply@localhost>',
     };
   },
@@ -84,7 +113,10 @@ export const tasteepConfig = {
   get photoUrlSecret(): string | undefined {
     return process.env.TASTEEP_PHOTO_URL_SECRET || undefined;
   },
-  /** Public base URL of this API, used to build absolute photo URLs. */
+  /**
+   * Public origin of this API (e.g. `https://api.tasteep.eu`), prefixed to
+   * signed photo URLs. Empty means relative photo URLs.
+   */
   get appUrl(): string {
     return (process.env.APP_URL ?? '').replace(/\/+$/, '');
   },
