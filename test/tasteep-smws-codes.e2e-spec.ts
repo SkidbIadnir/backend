@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument --
+/* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument --
    supertest types `res.body` as `any`; the assertions below are the typing. */
 import '../src/env'; // must run before AppModule is required — see src/env.ts
 
@@ -115,7 +115,7 @@ describe('SMWS codes (e2e)', () => {
       );
       expect(byCode.get('3')).toBe('scotland/islay'); // Islay
       expect(byCode.get('B1')).toBe('united-states/kentucky'); // Kentucky, USA
-      expect(byCode.get('R1')).toBeNull(); // Jamaica: not in the picker
+      expect(byCode.get('R1')).toBe('jamaica'); // Jamaica (country-level region)
     });
   });
 

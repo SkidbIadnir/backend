@@ -1,0 +1,17 @@
+# Keep the build context small and free of secrets.
+.git
+.github
+.claude
+.vscode
+.env
+.env.*
+!.env.example
+node_modules
+dist
+coverage
+data
+postman
+docs
+others
+*.md
+.DS_Store

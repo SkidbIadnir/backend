@@ -1,16 +1,22 @@
 #!/usr/bin/env node
 /**
- * Applies a schema-change SQL file to the database in `.env` (POSTGRES_*), in
- * one transaction. Production runs with TypeORM `synchronize` off, so every
+ * Applies a schema-change SQL file to the database named by POSTGRES_*, in one
+ * transaction. Preprod and prod run with TypeORM `synchronize` off, so every
  * entity change ships with a file in scripts/db/ that this applies.
  *
  *   npm run db:apply -- scripts/db/002-tasteep-feedback.sql          # dry run: runs, then rolls back
  *   npm run db:apply -- scripts/db/002-tasteep-feedback.sql --yes    # commits
  *
- * Use `--env <file>` to target another env file. Files must be idempotent
- * (IF NOT EXISTS …) so re-running one is harmless.
+ * POSTGRES_* come from the process environment first, then from `.env` if it
+ * exists (it never overrides). Inside the container (Coolify → Terminal) there
+ * is no `.env`, so the container's own variables are used:
+ *
+ *   node scripts/db/apply-sql.mjs scripts/db/NNN-x.sql [--yes]
+ *
+ * Use `--env <file>` to read another env file (it must exist). Files must be
+ * idempotent (IF NOT EXISTS …) so re-running one is harmless.
  */
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import dotenv from 'dotenv';
 import pg from 'pg';
 
@@ -27,7 +33,12 @@ if (!file) {
   process.exit(2);
 }
 
-dotenv.config({ path: envFile, quiet: true });
+if (existsSync(envFile)) {
+  dotenv.config({ path: envFile, quiet: true });
+} else if (envIdx >= 0) {
+  console.error(`env file not found: ${envFile}`);
+  process.exit(2);
+}
 const {
   POSTGRES_HOST,
   POSTGRES_PORT,
@@ -35,6 +46,12 @@ const {
   POSTGRES_USER,
   POSTGRES_PASSWORD,
 } = process.env;
+if (!POSTGRES_HOST || !POSTGRES_DB || !POSTGRES_USER) {
+  console.error(
+    'POSTGRES_HOST, POSTGRES_DB and POSTGRES_USER must be set (environment or .env).',
+  );
+  process.exit(2);
+}
 const sql = readFileSync(file, 'utf8');
 const target = `${POSTGRES_USER}@${POSTGRES_HOST}:${POSTGRES_PORT ?? 5432}/${POSTGRES_DB}`;
 
@@ -47,7 +64,12 @@ const client = new pg.Client({
 });
 
 console.log(`${commit ? 'Applying' : 'Dry run of'} ${file} on ${target}`);
-await client.connect();
+try {
+  await client.connect();
+} catch (err) {
+  console.error(`Could not connect to ${target}: ${err.message}`);
+  process.exit(1);
+}
 const notices = [];
 client.on('notice', (n) => notices.push(n.message));
 try {

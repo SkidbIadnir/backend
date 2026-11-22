@@ -1,7 +1,15 @@
 # Tasteep API — client contract
 
-Base URL: `https://api.skidhub.fr` (`ApiConfig.baseUrl`). Plain JSON, no envelope, snake_case
-keys, ISO 8601 dates. Every route except the login ones needs `Authorization: Bearer <token>`.
+Base URL (`ApiConfig.baseUrl`), one per environment:
+
+| Environment | Base URL |
+|---|---|
+| prod | `https://api.tasteep.eu` |
+| preprod | `https://api.preprod.tasteep.eu` |
+| dev | `https://api.dev.tasteep.eu` |
+
+Plain JSON, no envelope, snake_case keys, ISO 8601 dates. Every route except the login ones,
+signed photo URLs and `GET /health` needs `Authorization: Bearer <token>`.
 
 Errors are Nest's default shape: `{"statusCode": 401, "message": "...", "error": "Unauthorized"}`.
 Validation failures are `400` with `message` as an array of strings.
@@ -33,8 +41,8 @@ Exactly `lib/models/tasting.dart`. Every field except `id`, `name`, `category`, 
   "name": "Lagavulin 16",
   "category": "whisky",                  // "whisky" | "rum" | "agave" | "other"
   "photo_path": "/data/user/0/…/a.jpg",  // opaque client-side path, stored & echoed as-is
-  "photo_url": "https://api.skidhub.fr/tasteep/photos/1b9d…/full?exp=1794700800&sig=…",  // read-only, or null
-  "photo_thumb_url": "https://api.skidhub.fr/tasteep/photos/1b9d…/thumb?exp=1794700800&sig=…",  // read-only, or null
+  "photo_url": "https://api.tasteep.eu/tasteep/photos/1b9d…/full?exp=1794700800&sig=…",  // read-only, or null
+  "photo_thumb_url": "https://api.tasteep.eu/tasteep/photos/1b9d…/thumb?exp=1794700800&sig=…",  // read-only, or null
   "distillery": "Lagavulin",
   "region": "Islay",                     // free text, kept verbatim
   "region_id": "scotland/islay",         // link into GET /tasteep/regions, or null
@@ -502,6 +510,18 @@ fire-and-forget: the user gets no reply or status through the API.
 | `429` | the user already sent `TASTEEP_FEEDBACK_MAX_PER_HOUR` (default 5) messages in the last hour; show "try again later" |
 
 The app should fill `app_version` and `platform` itself rather than asking the user.
+
+---
+
+## Health
+
+`GET /health` — no token, not rate-limited. Used by the Docker `HEALTHCHECK`, the CI smoke
+test after a deploy, and uptime monitoring.
+
+```json
+{ "status": "ok" }                          // 200: the app is up and the database answered SELECT 1
+{ "status": "error", "database": "down" }   // 503: the database failed or took more than 3 s
+```
 
 ---
 
