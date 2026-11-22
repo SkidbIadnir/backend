@@ -217,9 +217,7 @@ export class RegionsService implements OnModuleInit {
    * `aliases` were never set (`NULL`, e.g. created before the column existed)
    * get the file's.
    */
-  async seed(
-    file: RegionSeedFile = regionData as RegionSeedFile,
-  ): Promise<number> {
+  async seed(file: RegionSeedFile = regionData): Promise<number> {
     const existing = new Map(
       (await this.repo.find({ withDeleted: true })).map((r) => [r.id, r]),
     );
@@ -484,7 +482,7 @@ export class RegionsService implements OnModuleInit {
    * Order is not compared: positions shift whenever a row is added or
    * deleted, so they would always differ.
    */
-  async diff(file: RegionSeedFile = regionData as RegionSeedFile) {
+  async diff(file: RegionSeedFile = regionData) {
     const json = seedRows(file);
     const rows = await this.repo.find({ withDeleted: true });
     const byId = new Map(rows.map((r) => [r.id, r]));
@@ -537,7 +535,7 @@ export class RegionsService implements OnModuleInit {
 
   /** Live rows in the seed file's format, to replace `region.json` with. */
   async exportSeedFile(
-    bundled: RegionSeedFile = regionData as RegionSeedFile,
+    bundled: RegionSeedFile = regionData,
   ): Promise<RegionSeedFile> {
     return toSeedFile(await this.repo.find(), bundled);
   }

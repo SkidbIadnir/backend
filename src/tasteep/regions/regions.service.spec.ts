@@ -118,7 +118,7 @@ describe('regions helpers', () => {
   });
 
   it('the real seed file has unique ids and a centroid on every row', () => {
-    const rows = seedRows(regionData as RegionSeedFile);
+    const rows = seedRows(regionData);
     const ids = rows.map((r) => r.id);
     expect(new Set(ids).size).toBe(ids.length);
     for (const r of rows) {

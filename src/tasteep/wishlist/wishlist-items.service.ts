@@ -11,7 +11,11 @@ import { TasteepWishlistFolder } from '../entities/tasteep-wishlist-folder.entit
 import { TasteepTasting } from '../entities/tasteep-tasting.entity';
 import { UpsertWishlistItemDto } from './dto/upsert-wishlist-item.dto';
 import { RegionsService } from '../regions/regions.service';
-import { applyUpsertItemDto, toItemJson, WishlistItemJson } from './wishlist.mapper';
+import {
+  applyUpsertItemDto,
+  toItemJson,
+  WishlistItemJson,
+} from './wishlist.mapper';
 
 @Injectable()
 export class WishlistItemsService {

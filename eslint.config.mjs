@@ -32,4 +32,16 @@ export default tseslint.config(
       "prettier/prettier": ["error", { endOfLine: "auto" }],
     },
   },
+  {
+    // Jest mocks: `mock.calls[i]` is `any`, `async () => value` stubs are the
+    // idiom, and `expect(obj.method)` is not a detached call.
+    files: ['**/*.spec.ts', 'test/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-return': 'off',
+      '@typescript-eslint/require-await': 'off',
+      '@typescript-eslint/unbound-method': 'off',
+    },
+  },
 );

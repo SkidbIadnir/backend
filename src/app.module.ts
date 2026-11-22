@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AdminModule } from './admin/admin.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { HealthModule } from './health/health.module';
 import { TasteepModule } from './tasteep/tasteep.module';
 
 /**
@@ -16,9 +17,9 @@ import { TasteepModule } from './tasteep/tasteep.module';
  * is no central entity list to keep in sync.
  *
  * `.env` is loaded in `src/env.ts`, imported first thing in `main.ts` — not
- * here. `TasteepModule`'s static `JwtModule.register()` reads `process.env`
- * synchronously while this file's own imports are still being resolved, so
- * calling `dotenv.config()` down here is too late for it to see anything.
+ * here. `TypeOrmModule.forRoot()` below reads `process.env` synchronously
+ * while this file is being evaluated, so calling `dotenv.config()` down here
+ * would be too late for it to see anything.
  */
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { TasteepModule } from './tasteep/tasteep.module';
       logging: !['production', 'test'].includes(process.env.NODE_ENV ?? ''),
     }),
     ScheduleModule.forRoot(),
+    HealthModule,
     TasteepModule,
     AdminModule,
   ],

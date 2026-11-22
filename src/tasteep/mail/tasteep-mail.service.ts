@@ -6,6 +6,7 @@ import { tasteepConfig } from '../tasteep-config';
 /**
  * Sends transactional email over SMTP. When `TASTEEP_SMTP_HOST` is not set the
  * service runs in dev mode: nothing is sent and the OTP is written to the log.
+ * A host without credentials throws here, so the app fails at startup.
  */
 @Injectable()
 export class TasteepMailService {
@@ -27,7 +28,7 @@ export class TasteepMailService {
       host: smtp.host,
       port: smtp.port,
       secure: smtp.secure,
-      auth: smtp.user ? { user: smtp.user, pass: smtp.pass } : undefined,
+      auth: { user: smtp.user, pass: smtp.pass },
     });
     this.from = smtp.from;
   }

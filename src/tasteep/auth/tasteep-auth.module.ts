@@ -19,9 +19,13 @@ import { DiscordOAuthService } from './discord-oauth.service';
   imports: [
     TypeOrmModule.forFeature([TasteepUser, TasteepSession, TasteepEmailOtp]),
     PassportModule,
-    JwtModule.register({
-      secret: tasteepConfig.jwtSecret,
-      signOptions: { audience: TASTEEP_JWT_AUDIENCE },
+    // Async so the secret is read while Nest builds the module (a missing one
+    // fails startup with tasteepConfig's message), not at import time.
+    JwtModule.registerAsync({
+      useFactory: () => ({
+        secret: tasteepConfig.jwtSecret,
+        signOptions: { audience: TASTEEP_JWT_AUDIENCE },
+      }),
     }),
     HttpModule,
     TasteepMailModule,
