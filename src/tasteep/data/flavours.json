@@ -1,0 +1,136 @@
+{
+  "_comment": "Flavour vocabulary for tasting tags (tasteep_flavours). Ids are slugs of name_en (category, category/flavour) unless an explicit id is given. Tags match an id, a name or an alias, ignoring case, accents and spacing; no key may belong to two rows. The boot seed inserts missing ids and adds these aliases to existing rows; edit live rows from /admin/flavours and save GET /admin/flavours/export over this file.",
+  "flavours": [
+    {
+      "name_en": "Fruity",
+      "name_fr": "Fruité",
+      "aliases": ["fruit", "fruits", "fruitée"],
+      "sub": [
+        { "name_en": "Citrus", "name_fr": "Agrumes", "aliases": ["lemon", "citron", "orange", "orange peel", "zest", "zeste", "lime", "grapefruit", "pamplemousse", "agrume"] },
+        { "name_en": "Orchard fruit", "name_fr": "Fruits du verger", "aliases": ["apple", "pomme", "green apple", "pomme verte", "pear", "poire"] },
+        { "name_en": "Stone fruit", "name_fr": "Fruits à noyau", "aliases": ["peach", "pêche", "apricot", "abricot", "cherry", "cerise", "plum"] },
+        { "name_en": "Red fruit", "name_fr": "Fruits rouges", "aliases": ["red berries", "berries", "strawberry", "fraise", "raspberry", "framboise", "blackcurrant", "cassis", "fruits des bois"] },
+        { "name_en": "Tropical fruit", "name_fr": "Fruits exotiques", "aliases": ["tropical", "exotic", "exotique", "pineapple", "ananas", "mango", "mangue", "banana", "banane", "passion fruit", "coconut", "noix de coco"] },
+        { "name_en": "Dried fruit", "name_fr": "Fruits secs", "aliases": ["raisins", "raisins secs", "sultanas", "fig", "figs", "figue", "figues", "date", "dates", "datte", "dattes", "pruneau", "pruneaux", "candied fruit", "fruits confits"] }
+      ]
+    },
+    {
+      "name_en": "Floral",
+      "name_fr": "Floral",
+      "aliases": ["flowers", "flowery", "fleurs", "fleuri", "florale"],
+      "sub": [
+        { "name_en": "Heather", "name_fr": "Bruyère", "aliases": [] },
+        { "name_en": "Blossom", "name_fr": "Fleurs blanches", "aliases": ["white flowers", "orange blossom", "fleur d'oranger", "elderflower", "sureau"] },
+        { "name_en": "Rose", "name_fr": "Rose", "aliases": ["violet", "violette"] }
+      ]
+    },
+    {
+      "name_en": "Sweet",
+      "name_fr": "Sucré",
+      "aliases": ["sweetness", "sucrée", "doux", "douceur"],
+      "sub": [
+        { "name_en": "Honey", "name_fr": "Miel", "aliases": ["honeyed", "miellé", "mielleux"] },
+        { "name_en": "Vanilla", "name_fr": "Vanille", "aliases": [] },
+        { "name_en": "Caramel", "name_fr": "Caramel", "aliases": ["toffee", "butterscotch", "fudge", "caramélisé"] },
+        { "name_en": "Chocolate", "name_fr": "Chocolat", "aliases": ["dark chocolate", "chocolat noir", "cocoa", "cacao"] },
+        { "name_en": "Molasses", "name_fr": "Mélasse", "aliases": ["treacle", "brown sugar", "sucre brun", "cassonade"] }
+      ]
+    },
+    {
+      "name_en": "Cereal",
+      "name_fr": "Céréales",
+      "aliases": ["cereals", "céréale", "céréalier", "grain", "grains"],
+      "sub": [
+        { "name_en": "Malt", "name_fr": "Malt", "aliases": ["malty", "malté"] },
+        { "name_en": "Biscuit", "name_fr": "Biscuit", "aliases": ["cookie", "shortbread", "sablé"] },
+        { "name_en": "Bread", "name_fr": "Pain", "aliases": ["brioche", "dough", "pâte", "yeast", "levure"] }
+      ]
+    },
+    {
+      "name_en": "Nutty",
+      "name_fr": "Fruits à coque",
+      "aliases": ["nuts", "nut"],
+      "sub": [
+        { "name_en": "Almond", "name_fr": "Amande", "aliases": ["marzipan", "massepain", "pâte d'amande"] },
+        { "name_en": "Hazelnut", "name_fr": "Noisette", "aliases": [] },
+        { "name_en": "Walnut", "name_fr": "Noix", "aliases": [] }
+      ]
+    },
+    {
+      "name_en": "Spicy",
+      "name_fr": "Épicé",
+      "aliases": ["spice", "spices", "épices", "épicée"],
+      "sub": [
+        { "name_en": "Pepper", "name_fr": "Poivre", "aliases": ["peppery", "black pepper"] },
+        { "name_en": "Cinnamon", "name_fr": "Cannelle", "aliases": [] },
+        { "name_en": "Clove", "name_fr": "Clou de girofle", "aliases": ["cloves", "girofle"] },
+        { "name_en": "Ginger", "name_fr": "Gingembre", "aliases": [] },
+        { "name_en": "Nutmeg", "name_fr": "Muscade", "aliases": ["noix de muscade"] },
+        { "name_en": "Liquorice", "name_fr": "Réglisse", "aliases": ["licorice", "anise", "aniseed", "anis"] }
+      ]
+    },
+    {
+      "name_en": "Woody",
+      "name_fr": "Boisé",
+      "aliases": ["wood", "bois", "boisée"],
+      "sub": [
+        { "name_en": "Oak", "name_fr": "Chêne", "aliases": ["oaky"] },
+        { "name_en": "Toasted oak", "name_fr": "Bois toasté", "aliases": ["toasted", "toast", "toasté", "charred", "char", "grillé"] },
+        { "name_en": "Cedar", "name_fr": "Cèdre", "aliases": ["sandalwood", "santal", "pencil shavings"] },
+        { "name_en": "Leather", "name_fr": "Cuir", "aliases": [] },
+        { "name_en": "Tobacco", "name_fr": "Tabac", "aliases": ["cigar", "cigare"] }
+      ]
+    },
+    {
+      "name_en": "Smoky",
+      "name_fr": "Fumé",
+      "aliases": ["smoke", "smokey", "smoked", "fumée"],
+      "sub": [
+        { "name_en": "Peat", "name_fr": "Tourbe", "aliases": ["peaty", "peated", "heavily peated", "tourbée", "très tourbé"] },
+        { "name_en": "Bonfire", "name_fr": "Feu de bois", "aliases": ["campfire", "wood smoke", "feu de camp", "ash", "cendre", "cendres"] },
+        { "name_en": "Medicinal", "name_fr": "Médicinal", "aliases": ["iodine", "tcp", "hospital", "antiseptic", "antiseptique", "phenolic", "phénolique"] },
+        { "name_en": "Tar", "name_fr": "Goudron", "aliases": ["tarry", "rubber", "caoutchouc"] }
+      ]
+    },
+    {
+      "name_en": "Coastal",
+      "name_fr": "Marin",
+      "aliases": ["côtier", "maritime", "sea", "mer", "sea air", "sea spray", "embruns", "iodé"],
+      "sub": [
+        { "name_en": "Sea salt", "name_fr": "Sel marin", "aliases": ["salt", "salty", "saline", "brine", "sel", "salé", "salin", "saumure"] },
+        { "name_en": "Seaweed", "name_fr": "Algues", "aliases": ["kelp", "algue"] }
+      ]
+    },
+    {
+      "name_en": "Winey",
+      "name_fr": "Vineux",
+      "aliases": ["wine", "vin", "vineuse"],
+      "sub": [
+        { "name_en": "Sherry", "name_fr": "Xérès", "aliases": ["sherried", "sherry cask", "fût de sherry", "oloroso", "px", "pedro ximenez", "fino", "manzanilla"] },
+        { "name_en": "Port", "name_fr": "Porto", "aliases": ["port cask", "fût de porto", "tawny", "ruby"] },
+        { "name_en": "Red wine", "name_fr": "Vin rouge", "aliases": ["red wine cask", "bordeaux"] }
+      ]
+    },
+    {
+      "name_en": "Herbal",
+      "name_fr": "Herbacé",
+      "aliases": ["herbs", "herbes", "herbacée", "green", "vert", "vegetal"],
+      "sub": [
+        { "name_en": "Grass", "name_fr": "Herbe coupée", "aliases": ["grassy", "cut grass", "herbe", "hay", "foin", "straw", "paille"] },
+        { "name_en": "Mint", "name_fr": "Menthe", "aliases": ["menthol", "eucalyptus"] },
+        { "name_en": "Cooked agave", "name_fr": "Agave cuit", "aliases": ["agave", "roasted agave"] },
+        { "name_en": "Olive", "name_fr": "Olive", "aliases": ["green olive", "olive verte"] }
+      ]
+    },
+    {
+      "name_en": "Earthy",
+      "name_fr": "Terreux",
+      "aliases": ["earth", "terre", "terreuse"],
+      "sub": [
+        { "name_en": "Mushroom", "name_fr": "Champignon", "aliases": ["sous-bois", "forest floor", "humus"] },
+        { "name_en": "Sulphur", "name_fr": "Soufre", "aliases": ["sulfur", "struck match", "allumette", "meaty", "viandé"] },
+        { "name_en": "Funky", "name_fr": "Funky", "aliases": ["funk", "hogo", "overripe"] }
+      ]
+    }
+  ]
+}

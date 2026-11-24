@@ -6,6 +6,8 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Max,
+  Min,
 } from 'class-validator';
 import { AUTH_PROVIDERS } from '../../tasteep/entities/tasteep-user.entity';
 import type { AuthProvider } from '../../tasteep/entities/tasteep-user.entity';
@@ -102,6 +104,23 @@ export class RegionsQueryDto {
   @IsOptional()
   @QueryBoolean()
   include_deleted?: boolean;
+}
+
+export class FlavoursQueryDto {
+  /** Also include soft-deleted rows (they carry a `deleted_at`). */
+  @IsOptional()
+  @QueryBoolean()
+  include_deleted?: boolean;
+}
+
+export class UnmatchedTagsQueryDto {
+  /** Default 100. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(1000)
+  limit?: number;
 }
 
 export class FeedbackQueryDto extends PaginationQueryDto {

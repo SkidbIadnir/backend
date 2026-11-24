@@ -71,6 +71,7 @@ export const makeTasting = (
   score: 88,
   appearance: 'Deep amber',
   tags: ['peat', 'smoke'],
+  flavourIds: ['smoky/peat', 'smoky'],
   nose: 'Bonfire',
   palate: 'Iodine',
   finish: 'Long',

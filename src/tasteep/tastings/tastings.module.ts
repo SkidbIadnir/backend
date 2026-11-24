@@ -6,6 +6,7 @@ import { TasteepRegion } from '../entities/tasteep-region.entity';
 import { SmwsMeService } from './smws-me.service';
 import { TasteepAuthModule } from '../auth/tasteep-auth.module';
 import { RegionsModule } from '../regions/regions.module';
+import { FlavoursModule } from '../flavours/flavours.module';
 import { SmwsBottlesModule } from '../smws-bottles/smws-bottles.module';
 import { PhotosModule } from '../photos/photos.module';
 import { TastingsService } from './tastings.service';
@@ -19,6 +20,7 @@ import {
     TypeOrmModule.forFeature([TasteepTasting, TasteepSmwsCode, TasteepRegion]),
     TasteepAuthModule,
     RegionsModule,
+    FlavoursModule,
     SmwsBottlesModule,
     PhotosModule,
   ],

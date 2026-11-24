@@ -45,12 +45,12 @@ It runs as one Nest process against one PostgreSQL database. `README.md` is the 
 
 ### `src/tasteep/`: user-facing API (`/auth/*`, `/tasteep/*`)
 
-- Each feature folder (`auth`, `tastings`, `wishlist`, `geocode`, `regions`, `smws-codes`, `smws-bottles`,
-  `photos`, `feedback`, `mail`) normally holds `*.module.ts`, `*.controller.ts`, `*.service.ts`, `dto/`,
+- Each feature folder (`auth`, `tastings`, `wishlist`, `geocode`, `regions`, `flavours`, `smws-codes`,
+  `smws-bottles`, `photos`, `feedback`, `mail`) normally holds `*.module.ts`, `*.controller.ts`, `*.service.ts`, `dto/`,
   `*.mapper.ts` and colocated `*.spec.ts`.
 - All entities live in `src/tasteep/entities/`.
-- Seed JSON lives in `src/tasteep/data/` and is loaded in `onModuleInit` of the regions, smws-codes and
-  distillery-locations services.
+- Seed JSON lives in `src/tasteep/data/` and is loaded in `onModuleInit` of the regions, flavours,
+  smws-codes and distillery-locations services.
 - Put pure logic in plain files (`*.parse.ts`, `*.rules.ts`, `*.search.ts`, `*.mapper.ts`) so it can be
   unit-tested without Nest.
 - The JSON contract is **snake_case**, for both request DTO fields and mapper output. Entities use camelCase
@@ -154,9 +154,11 @@ It runs as one Nest process against one PostgreSQL database. `README.md` is the 
   - `TasteepUser` (`tasteep_users`)
   - `TasteepSession`
   - `TasteepEmailOtp`
-  - `TasteepTasting`, which links to a region and an SMWS bottle (both `SET NULL`)
+  - `TasteepTasting`, which links to a region and an SMWS bottle (both `SET NULL`). `tags` is free text;
+    `flavour_ids` is derived from it by `FlavoursService` (on write, and `reindex` after vocabulary changes).
   - `TasteepGeocodeCache`
   - `TasteepRegion` (self-referencing tree)
+  - `TasteepFlavour` (`tasteep_flavours`, category → flavour tree with en/fr names and aliases)
   - `TasteepSmwsCode`
   - `TasteepSmwsBottle` → **`tasteep_smws_catalog`**
   - `TasteepSmwsPage`

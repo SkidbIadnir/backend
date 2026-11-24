@@ -9,6 +9,7 @@ import { In } from 'typeorm';
 import sharp from 'sharp';
 import { TastingsService } from './tastings.service';
 import { RegionsService } from '../regions/regions.service';
+import { FlavoursService } from '../flavours/flavours.service';
 import { SmwsBottlesService } from '../smws-bottles/smws-bottles.service';
 import { PhotoStorageService } from '../photos/photo-storage.service';
 import type { TasteepSmwsBottle } from '../entities/tasteep-smws-bottle.entity';
@@ -31,6 +32,7 @@ describe('TastingsService', () => {
   let service: TastingsService;
   let repo: MockRepository<TasteepTasting>;
   const regions = { resolve: jest.fn() };
+  const flavours = { resolve: jest.fn() };
   const bottles = { findRow: jest.fn(), findRowOrNull: jest.fn() };
   const photos = { save: jest.fn(), remove: jest.fn() };
   const OLD_PHOTO_ID = '0f0e0d0c-0b0a-4908-8706-050403020100';
@@ -68,6 +70,7 @@ describe('TastingsService', () => {
   beforeEach(async () => {
     repo = createMockRepository<TasteepTasting>();
     regions.resolve.mockReset().mockResolvedValue(null);
+    flavours.resolve.mockReset().mockResolvedValue([]);
     bottles.findRow.mockReset();
     bottles.findRowOrNull.mockReset().mockResolvedValue(null);
     photos.save.mockReset().mockResolvedValue(undefined);
@@ -78,6 +81,7 @@ describe('TastingsService', () => {
         TastingsService,
         { provide: getRepositoryToken(TasteepTasting), useValue: repo },
         { provide: RegionsService, useValue: regions },
+        { provide: FlavoursService, useValue: flavours },
         { provide: SmwsBottlesService, useValue: bottles },
         { provide: PhotoStorageService, useValue: photos },
       ],
@@ -215,6 +219,26 @@ describe('TastingsService', () => {
       expect(repo.save!.mock.calls[0][0]).toMatchObject({
         region: 'islay, scotland',
         regionId: 'scotland/islay',
+      });
+    });
+
+    it('stores cleaned tags and the flavour ids they resolve to', async () => {
+      repo
+        .findOne!.mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(makeTasting());
+      repo.save!.mockImplementation(async (t: TasteepTasting) => t);
+      flavours.resolve.mockResolvedValue(['smoky/peat']);
+
+      await service.upsert(
+        USER_ID,
+        TASTING_ID,
+        makeUpsertDto({ tags: [' Tourbé ', 'tourbe', '', 'my  own'] }),
+      );
+
+      expect(flavours.resolve).toHaveBeenCalledWith(['Tourbé', 'my own']);
+      expect(repo.save!.mock.calls[0][0]).toMatchObject({
+        tags: ['Tourbé', 'my own'],
+        flavourIds: ['smoky/peat'],
       });
     });
 
