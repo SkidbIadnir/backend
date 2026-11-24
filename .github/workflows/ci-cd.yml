@@ -60,7 +60,7 @@ jobs:
           --health-timeout 5s
           --health-retries 12
     env:
-      NODE_ENV: test # TypeORM synchronize creates the schema in the empty DB
+      NODE_ENV: test # keeps TypeORM's SQL logging off; the migrations build the schema
       POSTGRES_HOST: localhost
       POSTGRES_PORT: 5432
       POSTGRES_USER: tasteep
@@ -78,6 +78,12 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - run: npm run build
+      # The migrations must build the whole schema from an empty database…
+      - run: npm run migration:run
+      # …and leave nothing for migration:generate to find: an entity change
+      # without its migration fails here.
+      - run: npm run migration:check
       - run: npm run test:e2e
 
   image:
