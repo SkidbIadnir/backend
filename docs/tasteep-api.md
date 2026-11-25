@@ -33,7 +33,7 @@ Validation failures are `400` with `message` as an array of strings.
 ### `Tasting`
 
 Exactly `lib/models/tasting.dart`. Every field except `id`, `name`, `category`, `tags`,
-`location_precision` may be `null`.
+`flavour_ids`, `location_precision` may be `null`.
 
 ```json
 {
@@ -56,7 +56,8 @@ Exactly `lib/models/tasting.dart`. Every field except `id`, `name`, `category`, 
   "location": "Home",
   "score": 88,                           // int 0–100
   "appearance": null,
-  "tags": ["peat", "smoke"],
+  "tags": ["peat", "smoke"],              // free text, kept as typed (trimmed, duplicates dropped)
+  "flavour_ids": ["smoky/peat", "smoky"], // read-only: ids from GET /tasteep/flavours the tags match
   "nose": "Bonfire",
   "palate": null,
   "finish": "Long",
@@ -153,6 +154,11 @@ All scoped to the authenticated user; other users' rows are invisible (404).
     country (`"Islay"`, `"Islay, Scotland"` and `"Scotland / Speyside"` all link). A few
     aliases are known (`Highlands`, `Lowlands`, `USA`). No match → `region_id: null`,
     text untouched. Typing anything is always allowed.
+- **Tags.** `tags` is free text: at most 50, each at most 100 characters (`400` otherwise).
+  They are stored trimmed, with inner spaces collapsed, empty ones dropped and later
+  duplicates dropped (case and accents ignored, first spelling kept). Each tag is matched
+  against the [flavour vocabulary](#flavours); the matches come back in `flavour_ids`
+  (read-only, ignored in the body). Tags nothing matches are kept as custom tags.
 - **SMWS bottle.** `smws_sku` links the tasting to a catalog bottle. It is the one key that
   does not follow full replacement:
   - a SKU or cask code (`"29.311"`) → it must exist (`400 Unknown smws_sku "…"`); the SKU is
@@ -260,6 +266,42 @@ subregions (empty list when the country is the only sensible choice).
   `region_id` keep it, and sending that id back on `PUT` is still accepted.
 - Typed `region` text is matched against names and each region's `aliases` (`USA`,
   `Highlands`…); renaming a region in the dashboard keeps the old name as an alias.
+
+---
+
+## Flavours
+
+`GET /tasteep/flavours` → the flavour vocabulary for the tag picker: categories in display
+order, each with its flavours. Labels come in English and French; show the one for the
+app's locale.
+
+```json
+[
+  {
+    "id": "smoky", "name_en": "Smoky", "name_fr": "Fumé",
+    "children": [
+      { "id": "smoky/peat",    "name_en": "Peat",    "name_fr": "Tourbe" },
+      { "id": "smoky/bonfire", "name_en": "Bonfire", "name_fr": "Feu de bois" }
+    ]
+  }
+]
+```
+
+- Ids are stable slugs (`category` or `category/flavour`), safe to store and compare. A
+  category is a valid match on its own ("smoky" → `smoky`).
+- A tag matches a flavour when, ignoring case, accents, spacing and a leading `#`, it equals
+  the flavour's id, its English or French name, or one of its aliases (`peaty`, `tourbé`,
+  `sherried`…). So a French user's `tourbé` and an English user's `peaty` both give
+  `smoky/peat`.
+- For a picked chip, send the label in the user's language (readable in old app versions)
+  or the id; both match. Typed text that matches nothing stays a custom tag.
+- `flavour_ids` follows the vocabulary: when an admin adds an alias or a flavour, existing
+  tastings whose tags now match gain the id, without their `updated_at` changing. Re-fetch
+  tastings to see it.
+- Weak `ETag` + `If-None-Match` → `304`, as for regions. Fetch once per app start.
+- The table is edited from the admin dashboard (`/admin/flavours`), including a queue of
+  unmatched tags to map. `src/tasteep/data/flavours.json` seeds it: at boot, missing ids are
+  inserted and the file's aliases are added to existing rows; nothing is renamed or removed.
 
 ---
 
@@ -547,3 +589,8 @@ test after a deploy, and uptime monitoring.
    (bug / idea / other) and a message field, posted to `POST /tasteep/feedback` with the app
    version and platform. Show a thank-you on `201` and "try again later" on `429`. See
    [Feedback](#feedback).
+8. **Flavours.** `Tasting` gains `flavour_ids` (list of strings, read-only; add it to
+   `tasting.dart`, don't send it). Build the tag chips from `GET /tasteep/flavours` instead
+   of the `tagSuggestions` string, labelled in the app's locale, and keep "add your own".
+   When editing, show a chip as selected if its id is in `flavour_ids`, so an old `tourbé`
+   tag lights up "Peat". Suggest the user's own past custom tags too (from their tastings).

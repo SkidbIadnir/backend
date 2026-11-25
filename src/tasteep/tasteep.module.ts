@@ -3,6 +3,7 @@ import { TasteepAuthModule } from './auth/tasteep-auth.module';
 import { TastingsModule } from './tastings/tastings.module';
 import { GeocodeModule } from './geocode/geocode.module';
 import { RegionsModule } from './regions/regions.module';
+import { FlavoursModule } from './flavours/flavours.module';
 import { WishlistModule } from './wishlist/wishlist.module';
 import { SmwsCodesModule } from './smws-codes/smws-codes.module';
 import { SmwsBottlesModule } from './smws-bottles/smws-bottles.module';
@@ -19,6 +20,7 @@ import { FeedbackModule } from './feedback/feedback.module';
   imports: [
     TasteepAuthModule,
     RegionsModule,
+    FlavoursModule,
     TastingsModule,
     GeocodeModule,
     WishlistModule,

@@ -22,8 +22,9 @@ ENV NODE_ENV=production
 COPY --from=build /app/package*.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
-# Schema scripts, applied from inside the container on preprod/prod:
-#   node scripts/db/apply-sql.mjs scripts/db/NNN-x.sql [--yes]
+# Pre-migration schema scripts (history) and the ad hoc SQL runner:
+#   node scripts/db/apply-sql.mjs some.sql [--yes]
+# Migrations ship in dist/database/migrations and run when the app boots.
 COPY --from=build /app/scripts/db ./scripts/db
 
 # Tasting photos. Mount a persistent volume here, otherwise uploads are lost
