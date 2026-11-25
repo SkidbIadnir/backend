@@ -314,6 +314,44 @@ export class AdminRegionTreeJson extends AdminRegionNodeJson {
   subregions: AdminRegionNodeJson[];
 }
 
+export class AdminFlavourRowJson {
+  id: string;
+  parent_id: string | null;
+  name_en: string;
+  name_fr: string;
+  sort_order: number;
+  aliases: string[];
+  deleted_at: string | null;
+}
+/** `tasting_count`: tastings whose `flavour_ids` hold this id directly, not its children's. */
+export class AdminFlavourNodeJson extends AdminFlavourRowJson {
+  tasting_count: number;
+}
+export class AdminFlavourTreeJson extends AdminFlavourNodeJson {
+  children: AdminFlavourNodeJson[];
+}
+export class UnmatchedTagSpelling {
+  tag: string;
+  count: number;
+}
+export class UnmatchedTagJson {
+  /** Normalised key (case, accents, spacing ignored). */
+  key: string;
+  /** How users wrote it, most used first. */
+  spellings: UnmatchedTagSpelling[];
+  tasting_count: number;
+  user_count: number;
+}
+export class UnmatchedTagsJson {
+  /** Distinct unmatched keys in all, before `limit`. */
+  total: number;
+  tags: UnmatchedTagJson[];
+}
+export class FlavourReindexJson {
+  scanned: number;
+  updated: number;
+}
+
 export class AdminFeedbackJson {
   id: string;
   user_id: string;

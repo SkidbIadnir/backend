@@ -322,3 +322,44 @@ export function stockChange(
   if (!stored || stored.inStock === merged.inStock) return null;
   return merged.inStock ? 'relisted' : 'delisted';
 }
+
+/** Sold-out bottles get a relist check when sold out for less than this… */
+export const RELIST_WINDOW_DAYS = 30;
+/** …or, without limit, while their page is still in the shop's sitemap. */
+export const RELIST_CHECK_EVERY_DAYS = 7;
+/** At most this many relist checks per run (about 25 minutes at 3 s a page). */
+export const RELIST_MAX_PER_RUN = 500;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export interface SoldOutBottle {
+  url: string;
+  delistedAt: Date | null;
+}
+
+/**
+ * Which sold-out bottles (already filtered to those not read for
+ * `RELIST_CHECK_EVERY_DAYS`, stalest first) to re-read this run:
+ *  - any bottle whose page is still in the sitemap, whenever it sold out —
+ *    a listed page can be restocked, and a bottle already sold out when first
+ *    seen has no `delistedAt` at all;
+ *  - a bottle off the sitemap only while sold out for less than
+ *    `RELIST_WINDOW_DAYS`. With no sitemap this run, that is the only rule.
+ * Recently sold-out bottles go first, so a backlog never delays them, then
+ * the cap keeps a run from re-reading the whole archive at once.
+ */
+export function relistCandidates<T extends SoldOutBottle>(
+  soldOut: T[],
+  sitemap: ReadonlySet<string>,
+  now: Date,
+  max = RELIST_MAX_PER_RUN,
+): T[] {
+  const windowStart = now.getTime() - RELIST_WINDOW_DAYS * DAY_MS;
+  const recent: T[] = [];
+  const listed: T[] = [];
+  for (const b of soldOut) {
+    if (b.delistedAt && b.delistedAt.getTime() > windowStart) recent.push(b);
+    else if (sitemap.has(b.url)) listed.push(b);
+  }
+  return [...recent, ...listed].slice(0, max);
+}

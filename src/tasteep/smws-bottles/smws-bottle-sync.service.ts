@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { And, DataSource, LessThan, MoreThan, Repository } from 'typeorm';
+import { DataSource, LessThan, Repository } from 'typeorm';
 import { TasteepSmwsBottle } from '../entities/tasteep-smws-bottle.entity';
 import { TasteepSmwsCode } from '../entities/tasteep-smws-code.entity';
 import {
@@ -17,6 +17,8 @@ import {
   CATALOG_RULES_VERSION,
   mergeBottle,
   readBottle,
+  RELIST_CHECK_EVERY_DAYS,
+  relistCandidates,
   StoredBottle,
   stockChange,
 } from './smws-catalog.rules';
@@ -25,10 +27,6 @@ import { parseProductPage } from './smws-product.parser';
 
 /** Session-level Postgres advisory lock: one scrape at a time across every process on the database. */
 const SCRAPE_LOCK_KEY = 727_455_001;
-/** Sold-out bottles are re-read for a relist while sold out for less than this… */
-const RELIST_WINDOW_DAYS = 30;
-/** …and at most once per this many days. */
-const RELIST_CHECK_EVERY_DAYS = 7;
 /** Pages read as `other` (no ABV) are read again after this many days. */
 const OTHER_RECHECK_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -53,8 +51,9 @@ const errorMessage = (e: unknown) =>
  *     recorded in `tasteep_smws_pages` (bottle, other or gone);
  *  2. stock check — every in-stock bottle's page is re-read: stock, price
  *     and any newly filled field;
- *  3. relist sweep — bottles sold out in the last 30 days are re-read
- *     weekly in case they come back;
+ *  3. relist sweep — sold-out bottles still in the sitemap, or sold out in
+ *     the last 30 days, are re-read weekly in case they come back
+ *     (`relistCandidates`);
  *  4. pages read as `other` (no ABV) are re-read monthly;
  *  5. bottle pages read under older rules (`CATALOG_RULES_VERSION`) are read
  *     again, so a rules fix reaches the archive too.
@@ -214,19 +213,27 @@ export class SmwsBottleSyncService implements OnModuleInit {
         select: { sku: true, url: true },
         where: { inStock: true, lastSeenAt: LessThan(run.startedAt) },
       });
-      // 3. Relist sweep of recently sold-out bottles.
+      // 3. Relist sweep of sold-out bottles that may come back.
       const now = Date.now();
-      const soldOut = await this.bottles.find({
-        select: { sku: true, url: true },
-        where: {
-          inStock: false,
-          delistedAt: MoreThan(new Date(now - RELIST_WINDOW_DAYS * DAY_MS)),
-          lastSeenAt: And(
-            LessThan(new Date(now - RELIST_CHECK_EVERY_DAYS * DAY_MS)),
-            LessThan(run.startedAt),
-          ),
-        },
-      });
+      const soldOut = relistCandidates(
+        await this.bottles.find({
+          select: { sku: true, url: true, delistedAt: true },
+          where: {
+            inStock: false,
+            lastSeenAt: LessThan(
+              new Date(now - RELIST_CHECK_EVERY_DAYS * DAY_MS),
+            ),
+          },
+          order: { lastSeenAt: 'ASC' },
+        }),
+        new Set(sitemap),
+        new Date(now),
+      );
+      if (soldOut.length) {
+        this.logger.log(
+          `Scrape #${run.id}: checking ${soldOut.length} sold-out bottle(s) for a relist.`,
+        );
+      }
       for (const { url } of [...inStock, ...soldOut]) {
         counters.checked++;
         await this.readAndStore(url, 'check', counters, cache);

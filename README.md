@@ -20,7 +20,8 @@ src/
 │   ├── tasteep.module.ts
 │   ├── tasteep-config.ts    every TASTEEP_* env var in one place
 │   ├── entities/            tasteep_users, tasteep_sessions, tasteep_email_otps,
-│   │                        tasteep_tastings, tasteep_geocode_cache, tasteep_regions
+│   │                        tasteep_tastings, tasteep_geocode_cache, tasteep_regions,
+│   │                        tasteep_flavours
 │   ├── auth/                /auth/* — email OTP, Google ID token, Discord code, sessions
 │   │   ├── tasteep-auth.controller.ts / .service.ts / .module.ts
 │   │   ├── otp.service.ts               issue/verify 6-digit codes (HMAC, TTL, attempts, cooldown)
@@ -37,6 +38,7 @@ src/
 │   │   └── dto/
 │   ├── geocode/             /tasteep/geocode — cache-first Nominatim with a 1 req/s limiter
 │   ├── regions/             /tasteep/regions — curated country/subregion picker, seeded from data/region.json
+│   ├── flavours/            /tasteep/flavours — flavour vocabulary that tags match, seeded from data/flavours.json
 │   ├── smws-codes/          /tasteep/smws-codes — SMWS code → distillery list, seeded from data/smws-codes.json
 │   ├── smws-bottles/        /tasteep/smws-bottles — bottles read from smws.eu (see below)
 │   │   ├── smws-http.client.ts          plain HTTP to smws.eu: sitemap + product pages, 3 s apart
@@ -50,7 +52,7 @@ src/
 │   ├── feedback/            /tasteep/feedback — user feedback (bug / idea / other), rate-limited per user
 │   └── test-utils/          Tasteep fixtures
 │
-└── admin/                   /admin/* dashboard API (stats, users, tastings, SMWS, codes, regions, feedback, logs)
+└── admin/                   /admin/* dashboard API (stats, users, tastings, SMWS, codes, regions, flavours, feedback, logs)
 
 docs/
 └── tasteep-api.md           full client contract for the Flutter app
@@ -89,6 +91,10 @@ check constraints on `category`, `location_precision`, `score`, indexes on
   photo is `photo_id` (server-generated), exposed as signed `photo_url`/`photo_thumb_url`.
 - `tasteep_geocode_cache.lat/lon` are nullable: misses are cached as `unknown` so a place
   Nominatim cannot resolve is never asked for again.
+- `tags` stay free text, as typed. `flavour_ids` is derived from them: the ids of
+  `tasteep_flavours` they match (by id, English/French name or alias, ignoring case and
+  accents). It is set on every write and recomputed for all tastings whenever the vocabulary
+  changes (boot seed, admin edits), so it is what stats and filters should read.
 
 ### Endpoints
 
@@ -113,6 +119,7 @@ check constraints on `category`, `location_precision`, `score`, indexes on
 | `GET` | `/tasteep/stats` | `{count, avg_score, distinct_distilleries}` |
 | `POST` | `/tasteep/geocode` | `{query}` → `{lat, lon, precision}` |
 | `GET` | `/tasteep/regions` | Country → subregion tree with centroids, ETag/304 |
+| `GET` | `/tasteep/flavours` | Category → flavour tree (English/French labels) that tags are matched against, ETag/304 |
 | `POST` | `/tasteep/feedback` | `{type, message, app_version?, platform?}` → `{id, created_at}`; 429 over the hourly limit |
 
 Request/response details, status codes and the location-precision rules are in
@@ -156,7 +163,10 @@ uses public pages: the product sitemap (`/xmlsitemap.php`) and the product pages
 2. **Stock check:** every in-stock bottle's page is re-read. **Availability is the page's own
    stock flag** (`BCData.product_attributes.instock`): out of stock (or a 404) sets
    `in_stock = false` and `delisted_at`; back in stock clears them.
-3. **Relist sweep:** bottles sold out in the last 30 days are re-read weekly.
+3. **Relist sweep:** sold-out bottles are re-read weekly while their page is still in the
+   sitemap (a listed page can be restocked, months later or for an event), or for 30 days after
+   selling out when it is not. At most 500 per run, recently sold-out ones first; a backlog
+   (such as the first runs after this rule shipped) clears over a few nights.
 4. Pages read as `other` are re-read monthly.
 5. **Rules upgrades:** bottle pages read under an older `CATALOG_RULES_VERSION`
    (`smws-catalog.rules.ts`) are read again, so a parsing fix reaches the whole archive. Bump
@@ -196,29 +206,36 @@ npm run start:dev
 ```
 
 Requirements: Node 20 (same as the Docker image and CI), PostgreSQL 14+ (the servers run 18).
-Outside production (`NODE_ENV !== 'production'`) TypeORM `synchronize` creates and alters
-tables on boot; preprod and prod run with `NODE_ENV=production`, so it is off there.
+### Database schema (migrations)
 
-Schema changes for preprod and prod live in `scripts/db/`, one idempotent SQL file per change.
-The script reads `POSTGRES_*` from the environment, then from `.env` if there is one:
+The schema is managed by TypeORM migrations in `src/database/migrations/`. The app runs the
+pending ones on boot, before it serves anything, in every environment; `synchronize` is off
+everywhere. `tasteep_migrations` records what each database has received.
+
+To change the schema:
 
 ```bash
-npm run db:apply -- scripts/db/002-tasteep-feedback.sql         # dry run (rolls back)
-npm run db:apply -- scripts/db/002-tasteep-feedback.sql --yes   # commit
+# 1. edit the entity, then, against a database that has all existing migrations:
+npm run migration:generate -- src/database/migrations/AddWishlistSharing
+# 2. read the generated SQL, then:
+npm run format
+# 3. import the new class in src/database/migrations/index.ts and append it to MIGRATIONS
 ```
 
-On preprod and prod, run it from inside the backend container (see [Deployment](#deployment)).
+`npm run migration:show` lists applied and pending migrations, `migration:check` fails if the
+entities and the database differ (CI runs it on every pull request), `migration:revert` undoes
+the last one. All of them work on `dist/`, so build first (`migration:generate` does).
 
-| File | Change |
-|---|---|
-| `001-tasting-photos.sql` | `tasteep_tastings.photo_id` |
-| `002-tasteep-feedback.sql` | `tasteep_feedback` table |
+A deploy starts the new container while the old one still serves requests, so a migration must
+not break the previous release: add columns and tables first, drop or rename them a release later.
 
-When you change an entity, add the next numbered file next to them.
+The first migration, `Baseline`, creates the whole schema on an empty database. On an existing one
+(dev, preprod and prod, built by `synchronize` and the old hand-written SQL), it creates nothing it
+already has and only catches up on `scripts/db/001`/`002`. Those SQL files are kept as history;
+`npm run db:apply` remains for ad hoc SQL.
 
-**Careful:** outside production, `synchronize` alters whatever database `.env` points at on
-every boot (and in e2e runs). If `.env` targets the shared database, entity changes reach it
-as soon as you start the app.
+**Careful:** starting the app or the e2e suite migrates whatever database `.env` points at
+(unless `POSTGRES_*` are set in the shell).
 
 ### Environment variables
 
@@ -293,7 +310,8 @@ whole Tasteep contract over HTTP — JWT guard, validation pipe, list ordering, 
 shelf, stats SQL, the manual-pin rules and the geocode cache. Only Nominatim is
 stubbed (its usage policy forbids automated querying). The suite creates throw-away users and
 deletes everything it made afterwards, so it is safe to run against a dev database. It sets
-`NODE_ENV=test`, which keeps schema sync on but turns TypeORM's SQL logging off.
+`NODE_ENV=test`, which turns TypeORM's SQL logging off. Booting the app runs the migrations, so
+an empty database gets the whole schema.
 
 ### Postman / newman
 
@@ -353,14 +371,10 @@ server managed with Coolify (private, reachable only on the Tailscale tailnet):
 Runtime variables live in Coolify, not GitHub. The repository secrets are `TS_OAUTH_CLIENT_ID`,
 `TS_OAUTH_SECRET`, `COOLIFY_URL`, `COOLIFY_TOKEN` and `COOLIFY_UUID_DEV` / `_PREPROD` / `_PROD`.
 
-**Schema changes:** preprod and prod run with `synchronize` off. Before merging a promotion
-PR that adds a `scripts/db` file, apply it to the target environment from Coolify → that
-environment's backend → **Terminal**:
-
-```bash
-node scripts/db/apply-sql.mjs scripts/db/NNN-x.sql         # dry run
-node scripts/db/apply-sql.mjs scripts/db/NNN-x.sql --yes   # commit
-```
+**Schema changes** need nothing by hand: each environment runs its pending migrations when the
+new container boots. Take a `pg_dump` first when a migration rewrites or drops data. To inspect an
+environment, open Coolify → that environment's backend → **Terminal** and run
+`npm run migration:show` or `npm run migration:check`.
 
 **Photos:** each backend has a persistent volume on `/data/photos`. The files are not in
 Postgres, so back that volume up together with the database dump, off the server. Uploads

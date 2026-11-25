@@ -1,6 +1,7 @@
 import { TasteepTasting } from '../entities/tasteep-tasting.entity';
 import { UpsertTastingDto } from './dto/upsert-tasting.dto';
 import { signedPhotoUrl } from '../photos/photo-url';
+import { cleanTags } from '../flavours/flavour.rules';
 
 /** Wire shape of `lib/models/tasting.dart` — snake_case keys, ISO 8601 strings. */
 export interface TastingJson {
@@ -31,6 +32,11 @@ export interface TastingJson {
   score: number | null;
   appearance: string | null;
   tags: string[];
+  /**
+   * Read-only: ids from `GET /tasteep/flavours` that `tags` match, in tag
+   * order. Tags nothing matches are custom and only appear in `tags`.
+   */
+  flavour_ids: string[];
   nose: string | null;
   palate: string | null;
   finish: string | null;
@@ -68,6 +74,7 @@ export function toTastingJson(t: TasteepTasting): TastingJson {
     score: t.score ?? null,
     appearance: t.appearance ?? null,
     tags: t.tags ?? [],
+    flavour_ids: t.flavourIds ?? [],
     nose: t.nose ?? null,
     palate: t.palate ?? null,
     finish: t.finish ?? null,
@@ -82,7 +89,7 @@ export function toTastingJson(t: TasteepTasting): TastingJson {
 /**
  * Full-replacement semantics: a key that is absent or null in the body
  * becomes null on the row (PUT, not PATCH). Defaults apply for the three
- * non-nullable enum/array fields. `smws_sku` is the exception, set by
+ * non-nullable enum/array fields. `smws_sku` and `flavour_ids` are set by
  * `TastingsService.upsert` (see `UpsertTastingDto.smws_sku`).
  */
 export function applyUpsertDto(
@@ -103,7 +110,7 @@ export function applyUpsertDto(
   target.location = dto.location ?? null;
   target.score = dto.score ?? null;
   target.appearance = dto.appearance ?? null;
-  target.tags = dto.tags ?? [];
+  target.tags = cleanTags(dto.tags);
   target.nose = dto.nose ?? null;
   target.palate = dto.palate ?? null;
   target.finish = dto.finish ?? null;

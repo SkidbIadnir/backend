@@ -55,6 +55,7 @@ const TASTING_KEYS = [
   'score',
   'appearance',
   'tags',
+  'flavour_ids',
   'nose',
   'palate',
   'finish',

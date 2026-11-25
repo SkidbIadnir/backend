@@ -14,6 +14,7 @@ import {
 import { UpsertTastingDto } from './dto/upsert-tasting.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
 import { RegionsService } from '../regions/regions.service';
+import { FlavoursService } from '../flavours/flavours.service';
 import { SmwsBottlesService } from '../smws-bottles/smws-bottles.service';
 import { PhotoStorageService } from '../photos/photo-storage.service';
 import { processPhoto } from '../photos/photo-processor';
@@ -49,6 +50,7 @@ export class TastingsService {
     @InjectRepository(TasteepTasting)
     private readonly repo: Repository<TasteepTasting>,
     private readonly regions: RegionsService,
+    private readonly flavours: FlavoursService,
     private readonly bottles: SmwsBottlesService,
     private readonly photos: PhotoStorageService,
   ) {}
@@ -102,6 +104,8 @@ export class TastingsService {
    * Region: `region_id` (from the picker) wins and must exist; otherwise the
    * free-text `region` is matched by name. Picking without text fills the
    * text with the region's name so the journal stays readable.
+   *
+   * Tags: stored cleaned (see `cleanTags`); `flavour_ids` is what they match.
    */
   async upsert(
     userId: string,
@@ -127,6 +131,8 @@ export class TastingsService {
     const region = await this.regions.resolve(dto.region_id, dto.region);
     target.regionId = region?.id ?? null;
     if (region && !target.region) target.region = region.name;
+
+    target.flavourIds = await this.flavours.resolve(target.tags);
 
     if (pinned && target.locationPrecision !== 'manual') {
       target.lat = pinned.lat;

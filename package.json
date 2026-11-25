@@ -20,6 +20,11 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json --runInBand",
     "db:apply": "node scripts/db/apply-sql.mjs",
+    "migration:generate": "nest build && typeorm -d dist/database/data-source.js migration:generate",
+    "migration:check": "typeorm -d dist/database/data-source.js migration:generate --check src/database/migrations/Pending",
+    "migration:show": "typeorm -d dist/database/data-source.js migration:show",
+    "migration:run": "typeorm -d dist/database/data-source.js migration:run",
+    "migration:revert": "typeorm -d dist/database/data-source.js migration:revert",
     "test:postman": "npx --yes newman@6 run postman/Backend.postman_collection.json -e postman/local.postman_environment.json --env-var tasteep_token=$TASTEEP_TOKEN --folder 'Tasteep — Tastings' --folder 'Tasteep — Atlas (phase 2)' --folder 'Tasteep — Cleanup'"
   },
   "dependencies": {
