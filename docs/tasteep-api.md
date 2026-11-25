@@ -278,10 +278,10 @@ app's locale.
 ```json
 [
   {
-    "id": "smoky", "name_en": "Smoky", "name_fr": "Fumé",
+    "id": "smoky", "name_en": "Smoky", "name_fr": "Fumé", "aliases": ["smoke", "fumée", "…"],
     "children": [
-      { "id": "smoky/peat",    "name_en": "Peat",    "name_fr": "Tourbe" },
-      { "id": "smoky/bonfire", "name_en": "Bonfire", "name_fr": "Feu de bois" }
+      { "id": "smoky/peat",    "name_en": "Peat",    "name_fr": "Tourbe",      "aliases": ["peaty", "tourbée", "…"] },
+      { "id": "smoky/bonfire", "name_en": "Bonfire", "name_fr": "Feu de bois", "aliases": ["campfire", "…"] }
     ]
   }
 ]
@@ -295,6 +295,12 @@ app's locale.
   `smoky/peat`.
 - For a picked chip, send the label in the user's language (readable in old app versions)
   or the id; both match. Typed text that matches nothing stays a custom tag.
+- **Un-picking a chip.** `flavour_ids` says which flavours a tasting has, not which tag gave
+  each one (an old `peaty` tag lights up "Peat"). To turn a chip off, remove every tag whose
+  key equals one of the entry's keys: its `id`, `name_en`, `name_fr` and `aliases`. The key
+  of a text is: trim it, drop leading `#`s, Unicode-decompose it (NFD) and drop combining
+  marks (U+0300–U+036F), collapse inner whitespace to one space, lower-case it
+  (`" #Tourbé "` → `tourbe`). The admin API refuses a key that belongs to another entry.
 - `flavour_ids` follows the vocabulary: when an admin adds an alias or a flavour, existing
   tastings whose tags now match gain the id, without their `updated_at` changing. Re-fetch
   tastings to see it.
@@ -593,4 +599,6 @@ test after a deploy, and uptime monitoring.
    `tasting.dart`, don't send it). Build the tag chips from `GET /tasteep/flavours` instead
    of the `tagSuggestions` string, labelled in the app's locale, and keep "add your own".
    When editing, show a chip as selected if its id is in `flavour_ids`, so an old `tourbé`
-   tag lights up "Peat". Suggest the user's own past custom tags too (from their tastings).
+   tag lights up "Peat". Turning a chip off removes every tag matching that entry's keys
+   (id, names, `aliases`; see [Un-picking a chip](#flavours)). Suggest the user's own past
+   custom tags too (from their tastings).
