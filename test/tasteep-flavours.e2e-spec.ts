@@ -127,11 +127,14 @@ describe('Flavours (e2e)', () => {
       res.body as { id: string; children: { id: string }[] }[]
     ).find((c) => c.id === 'smoky');
     expect(smoky).toMatchObject({ name_en: 'Smoky', name_fr: 'Fumé' });
-    expect(smoky!.children).toContainEqual({
-      id: 'smoky/peat',
-      name_en: 'Peat',
-      name_fr: 'Tourbe',
-    });
+    expect(smoky!.children).toContainEqual(
+      expect.objectContaining({
+        id: 'smoky/peat',
+        name_en: 'Peat',
+        name_fr: 'Tourbe',
+        aliases: expect.arrayContaining(['peaty']) as unknown,
+      }),
+    );
 
     await request(http)
       .get('/tasteep/flavours')

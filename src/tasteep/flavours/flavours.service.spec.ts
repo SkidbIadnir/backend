@@ -134,7 +134,15 @@ describe('FlavoursService', () => {
         id: 'smoky',
         name_en: 'Smoky',
         name_fr: 'Fumé',
-        children: [{ id: 'smoky/peat', name_en: 'Peat', name_fr: 'Tourbe' }],
+        aliases: [],
+        children: [
+          {
+            id: 'smoky/peat',
+            name_en: 'Peat',
+            name_fr: 'Tourbe',
+            aliases: ['peaty'],
+          },
+        ],
       },
     ]);
   });

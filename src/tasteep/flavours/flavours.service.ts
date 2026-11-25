@@ -32,6 +32,11 @@ export interface FlavourJson {
   id: string;
   name_en: string;
   name_fr: string;
+  /**
+   * Other spellings this entry matches (`peaty`, `tourbé`), so the app can
+   * tell which of a tasting's tags a picked chip stands for.
+   */
+  aliases: string[];
 }
 export interface FlavourCategoryJson extends FlavourJson {
   children: FlavourJson[];
@@ -180,6 +185,7 @@ export class FlavoursService implements OnModuleInit {
       id: r.id,
       name_en: r.nameEn,
       name_fr: r.nameFr,
+      aliases: r.aliases ?? [],
     });
     return nest(await this.repo.find()).map(({ category, children }) => ({
       ...toJson(category),
