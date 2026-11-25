@@ -6,6 +6,7 @@ import {
   parseReleaseDate,
   profileFromCategories,
   readBottle,
+  relistCandidates,
   StoredBottle,
   stockChange,
 } from './smws-catalog.rules';
@@ -471,5 +472,63 @@ describe('parseReleaseDate', () => {
     [undefined, null],
   ])('%s', (text, expected) => {
     expect(parseReleaseDate(text)?.toISOString() ?? null).toBe(expected);
+  });
+});
+
+describe('relistCandidates', () => {
+  const now = new Date('2026-11-25T03:00:00Z');
+  const daysAgo = (n: number) => new Date(now.getTime() - n * 86_400_000);
+  const bottle = (slug: string, delistedAt: Date | null) => ({
+    url: `https://smws.eu/${slug}`,
+    delistedAt,
+  });
+  const listed = new Set([
+    'https://smws.eu/old-listed',
+    'https://smws.eu/never-seen-in-stock',
+  ]);
+
+  it('checks listed bottles whenever they sold out, and unlisted ones for 30 days', () => {
+    const picked = relistCandidates(
+      [
+        bottle('old-listed', daysAgo(90)),
+        bottle('never-seen-in-stock', null),
+        bottle('old-unlisted', daysAgo(90)),
+        bottle('unlisted-no-date', null),
+        bottle('recent-unlisted', daysAgo(10)),
+      ],
+      listed,
+      now,
+    );
+    expect(picked.map((b) => b.url)).toEqual([
+      'https://smws.eu/recent-unlisted',
+      'https://smws.eu/old-listed',
+      'https://smws.eu/never-seen-in-stock',
+    ]);
+  });
+
+  it('falls back to the 30-day window when the sitemap is unavailable', () => {
+    const picked = relistCandidates(
+      [bottle('old-listed', daysAgo(90)), bottle('recent', daysAgo(29))],
+      new Set(),
+      now,
+    );
+    expect(picked.map((b) => b.url)).toEqual(['https://smws.eu/recent']);
+  });
+
+  it('caps a run, recently sold-out bottles first, then in the given (stalest-first) order', () => {
+    const picked = relistCandidates(
+      [
+        bottle('old-listed', daysAgo(90)),
+        bottle('never-seen-in-stock', null),
+        bottle('recent', daysAgo(3)),
+      ],
+      listed,
+      now,
+      2,
+    );
+    expect(picked.map((b) => b.url)).toEqual([
+      'https://smws.eu/recent',
+      'https://smws.eu/old-listed',
+    ]);
   });
 });
