@@ -6,6 +6,7 @@ import { SmwsCodesModule } from '../tasteep/smws-codes/smws-codes.module';
 import { SmwsBottlesModule } from '../tasteep/smws-bottles/smws-bottles.module';
 import { GeocodeModule } from '../tasteep/geocode/geocode.module';
 import { RegionsModule } from '../tasteep/regions/regions.module';
+import { FlavoursModule } from '../tasteep/flavours/flavours.module';
 import { TasteepFeedback } from '../tasteep/entities/tasteep-feedback.entity';
 import { TasteepEmailOtp } from '../tasteep/entities/tasteep-email-otp.entity';
 import { TasteepGeocodeCache } from '../tasteep/entities/tasteep-geocode-cache.entity';
@@ -17,6 +18,7 @@ import { AdminAuditService } from './admin-audit.service';
 import { AdminGuard } from './admin-auth.guard';
 import { AdminFeedbackController } from './admin-feedback.controller';
 import { AdminFeedbackService } from './admin-feedback.service';
+import { AdminFlavoursController } from './admin-flavours.controller';
 import { AdminDistilleryLocationsController } from './admin-distillery-locations.controller';
 import { AdminLogsController } from './admin-logs.controller';
 import { AdminRegionsController } from './admin-regions.controller';
@@ -49,6 +51,7 @@ import { ADMIN_LOG_BUFFER, logBuffer } from './logging/log-buffer';
     SmwsCodesModule,
     GeocodeModule,
     RegionsModule,
+    FlavoursModule,
     SmwsBottlesModule,
   ],
   controllers: [
@@ -59,6 +62,7 @@ import { ADMIN_LOG_BUFFER, logBuffer } from './logging/log-buffer';
     AdminSmwsCodesController,
     AdminDistilleryLocationsController,
     AdminRegionsController,
+    AdminFlavoursController,
     AdminLogsController,
     AdminFeedbackController,
   ],

@@ -33,6 +33,7 @@ describe('tasting.mapper', () => {
           'score',
           'appearance',
           'tags',
+          'flavour_ids',
           'nose',
           'palate',
           'finish',
@@ -47,6 +48,7 @@ describe('tasting.mapper', () => {
       expect(json.created_at).toBe('2026-03-10T20:00:00.000Z');
       expect(json.age_statement).toBe('16');
       expect(json.tags).toEqual(['peat', 'smoke']);
+      expect(json.flavour_ids).toEqual(['smoky/peat', 'smoky']);
     });
 
     it('turns undefined optional fields into null and missing tags into []', () => {
@@ -62,6 +64,7 @@ describe('tasting.mapper', () => {
       expect(json.photo_thumb_url).toBeNull();
       expect(json.date_tasted).toBeNull();
       expect(json.tags).toEqual([]);
+      expect(json.flavour_ids).toEqual([]);
       expect(json.location_precision).toBe('unknown');
       expect(json.created_at).toBeNull();
     });

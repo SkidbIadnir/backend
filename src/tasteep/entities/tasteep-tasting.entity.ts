@@ -139,8 +139,17 @@ export class TasteepTasting {
   @Column({ type: 'text', nullable: true })
   appearance: string | null;
 
+  /** Free text, kept as typed (trimmed, duplicates dropped). */
   @Column({ type: 'text', array: true, default: '{}' })
   tags: string[];
+
+  /**
+   * Derived, never sent by the client: the `tasteep_flavours` ids that `tags`
+   * match, in tag order. Set on every write and recomputed by
+   * `FlavoursService.reindex` when the vocabulary changes.
+   */
+  @Column({ name: 'flavour_ids', type: 'text', array: true, default: '{}' })
+  flavourIds: string[];
 
   @Column({ type: 'text', nullable: true })
   nose: string | null;

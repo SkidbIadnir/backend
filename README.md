@@ -20,7 +20,8 @@ src/
 │   ├── tasteep.module.ts
 │   ├── tasteep-config.ts    every TASTEEP_* env var in one place
 │   ├── entities/            tasteep_users, tasteep_sessions, tasteep_email_otps,
-│   │                        tasteep_tastings, tasteep_geocode_cache, tasteep_regions
+│   │                        tasteep_tastings, tasteep_geocode_cache, tasteep_regions,
+│   │                        tasteep_flavours
 │   ├── auth/                /auth/* — email OTP, Google ID token, Discord code, sessions
 │   │   ├── tasteep-auth.controller.ts / .service.ts / .module.ts
 │   │   ├── otp.service.ts               issue/verify 6-digit codes (HMAC, TTL, attempts, cooldown)
@@ -37,6 +38,7 @@ src/
 │   │   └── dto/
 │   ├── geocode/             /tasteep/geocode — cache-first Nominatim with a 1 req/s limiter
 │   ├── regions/             /tasteep/regions — curated country/subregion picker, seeded from data/region.json
+│   ├── flavours/            /tasteep/flavours — flavour vocabulary that tags match, seeded from data/flavours.json
 │   ├── smws-codes/          /tasteep/smws-codes — SMWS code → distillery list, seeded from data/smws-codes.json
 │   ├── smws-bottles/        /tasteep/smws-bottles — bottles read from smws.eu (see below)
 │   │   ├── smws-http.client.ts          plain HTTP to smws.eu: sitemap + product pages, 3 s apart
@@ -50,7 +52,7 @@ src/
 │   ├── feedback/            /tasteep/feedback — user feedback (bug / idea / other), rate-limited per user
 │   └── test-utils/          Tasteep fixtures
 │
-└── admin/                   /admin/* dashboard API (stats, users, tastings, SMWS, codes, regions, feedback, logs)
+└── admin/                   /admin/* dashboard API (stats, users, tastings, SMWS, codes, regions, flavours, feedback, logs)
 
 docs/
 └── tasteep-api.md           full client contract for the Flutter app
@@ -89,6 +91,10 @@ check constraints on `category`, `location_precision`, `score`, indexes on
   photo is `photo_id` (server-generated), exposed as signed `photo_url`/`photo_thumb_url`.
 - `tasteep_geocode_cache.lat/lon` are nullable: misses are cached as `unknown` so a place
   Nominatim cannot resolve is never asked for again.
+- `tags` stay free text, as typed. `flavour_ids` is derived from them: the ids of
+  `tasteep_flavours` they match (by id, English/French name or alias, ignoring case and
+  accents). It is set on every write and recomputed for all tastings whenever the vocabulary
+  changes (boot seed, admin edits), so it is what stats and filters should read.
 
 ### Endpoints
 
@@ -113,6 +119,7 @@ check constraints on `category`, `location_precision`, `score`, indexes on
 | `GET` | `/tasteep/stats` | `{count, avg_score, distinct_distilleries}` |
 | `POST` | `/tasteep/geocode` | `{query}` → `{lat, lon, precision}` |
 | `GET` | `/tasteep/regions` | Country → subregion tree with centroids, ETag/304 |
+| `GET` | `/tasteep/flavours` | Category → flavour tree (English/French labels) that tags are matched against, ETag/304 |
 | `POST` | `/tasteep/feedback` | `{type, message, app_version?, platform?}` → `{id, created_at}`; 429 over the hourly limit |
 
 Request/response details, status codes and the location-precision rules are in

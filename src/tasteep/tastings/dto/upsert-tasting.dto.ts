@@ -1,4 +1,5 @@
 import {
+  ArrayMaxSize,
   IsArray,
   IsIn,
   IsInt,
@@ -102,9 +103,15 @@ export class UpsertTastingDto {
   @IsString()
   appearance?: string | null;
 
+  /**
+   * Free text, or flavour ids / names from `GET /tasteep/flavours`. Stored
+   * trimmed with duplicates dropped; matches show up in `flavour_ids`.
+   */
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(50)
   @IsString({ each: true })
+  @MaxLength(100, { each: true })
   tags?: string[] | null;
 
   @IsOptional()
