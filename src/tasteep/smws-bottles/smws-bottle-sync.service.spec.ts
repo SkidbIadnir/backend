@@ -310,6 +310,47 @@ describe('SmwsBottleSyncService', () => {
     });
   });
 
+  describe('relist sweep', () => {
+    const soldOutLongAgo = storedBarrelbutt({
+      inStock: false,
+      stock: 0,
+      lastSeenAt: new Date('2026-09-01T00:00:00Z'),
+      delistedAt: new Date('2026-09-01T00:00:00Z'),
+    });
+
+    beforeEach(() => {
+      // Already read before: not a discovery.
+      pages.find!.mockResolvedValueOnce([{ url: url('barrelbutt') }]);
+      // 2. no in-stock bottle; 3. the sold-out one.
+      bottles.find!.mockResolvedValueOnce([]).mockResolvedValueOnce([
+        {
+          sku: soldOutLongAgo.sku,
+          url: soldOutLongAgo.url,
+          delistedAt: soldOutLongAgo.delistedAt,
+        },
+      ]);
+      bottles.findOne!.mockResolvedValue(soldOutLongAgo);
+      http.get.mockResolvedValue(ok(smwsProductPage()));
+    });
+
+    it('relists a bottle sold out months ago whose page is still in the sitemap', async () => {
+      http.productUrls.mockResolvedValue([url('barrelbutt')]);
+      const run = await service.run('cron');
+      expect(http.get).toHaveBeenCalledWith(url('barrelbutt'));
+      expect(saved[0]).toEqual(
+        expect.objectContaining({ inStock: true, stock: 45, delistedAt: null }),
+      );
+      expect(run).toEqual(expect.objectContaining({ checked: 1, relisted: 1 }));
+    });
+
+    it('leaves a bottle sold out months ago alone once its page left the sitemap', async () => {
+      http.productUrls.mockResolvedValue([]);
+      const run = await service.run('cron');
+      expect(http.get).not.toHaveBeenCalled();
+      expect(run?.checked).toBe(0);
+    });
+  });
+
   describe('rules upgrades', () => {
     it('re-reads bottle pages read under older rules and records the new version', async () => {
       pages

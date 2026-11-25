@@ -156,7 +156,10 @@ uses public pages: the product sitemap (`/xmlsitemap.php`) and the product pages
 2. **Stock check:** every in-stock bottle's page is re-read. **Availability is the page's own
    stock flag** (`BCData.product_attributes.instock`): out of stock (or a 404) sets
    `in_stock = false` and `delisted_at`; back in stock clears them.
-3. **Relist sweep:** bottles sold out in the last 30 days are re-read weekly.
+3. **Relist sweep:** sold-out bottles are re-read weekly while their page is still in the
+   sitemap (a listed page can be restocked, months later or for an event), or for 30 days after
+   selling out when it is not. At most 500 per run, recently sold-out ones first; a backlog
+   (such as the first runs after this rule shipped) clears over a few nights.
 4. Pages read as `other` are re-read monthly.
 5. **Rules upgrades:** bottle pages read under an older `CATALOG_RULES_VERSION`
    (`smws-catalog.rules.ts`) are read again, so a parsing fix reaches the whole archive. Bump
