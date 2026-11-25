@@ -15,7 +15,10 @@ It runs as one Nest process against one PostgreSQL database. `README.md` is the 
 | `npm run lint` | ESLint, **with `--fix`** (it rewrites files) |
 | `npm run lint:check` | ESLint + `prettier --check`, no writes. CI runs this. |
 | `npm run format` | Prettier on `src/` and `test/` |
-| `npm run db:apply -- <file.sql> [--yes] [--env <file>]` | Applies a schema SQL file to the DB named by `POSTGRES_*` (process env first, then `.env` if present). It does a dry run (transaction + rollback) unless you pass `--yes`. |
+| `npm run migration:generate -- src/database/migrations/<Name>` | Builds, then writes a migration with the SQL that takes the DB named by `POSTGRES_*` to the entities. Point it at a DB that is up to date with the existing migrations. |
+| `npm run migration:check` | Fails (and prints the SQL) if the entities differ from the DB's schema. Needs a build. CI runs it after `migration:run`. |
+| `npm run migration:show` / `migration:run` / `migration:revert` | Lists applied/pending migrations, runs pending ones, reverts the last one. Need a build. |
+| `npm run db:apply -- <file.sql> [--yes] [--env <file>]` | Applies an ad hoc SQL file to the DB named by `POSTGRES_*` (process env first, then `.env` if present). It does a dry run (transaction + rollback) unless you pass `--yes`. Schema changes go through migrations, not this. |
 | `TASTEEP_TOKEN=<jwt> npm run test:postman` | Runs the Newman scenario in `postman/` against a running server |
 
 - Use Node 20, the same version as the Docker image and CI. `package.json` has no `engines` field.
@@ -118,22 +121,27 @@ It runs as one Nest process against one PostgreSQL database. `README.md` is the 
 
 ## Database (TypeORM 0.3 + `pg`)
 
-- TypeORM is configured inline in `src/app.module.ts` with `TypeOrmModule.forRoot`, using `POSTGRES_*` env vars:
-  - There is no standalone DataSource and no TypeORM CLI.
-  - `autoLoadEntities: true` means each feature module registers its entities with
-    `TypeOrmModule.forFeature([...])`. There is no central entity list.
-  - `synchronize: NODE_ENV !== 'production'`, so local, dev-environment and e2e runs **auto-alter the schema
-    of whatever DB they point at**. Check `.env` before running `start:dev` or `test:e2e`. Never casually point
-    it at a database you care about. Preprod and prod run with `NODE_ENV=production` (also the image default).
+- Connection options live in `src/database/typeorm-options.ts` (`POSTGRES_*` env vars), shared by
+  `TypeOrmModule.forRoot` in `src/app.module.ts` and the CLI data source `src/database/data-source.ts`:
+  - `autoLoadEntities: true` in the app means each feature module registers its entities with
+    `TypeOrmModule.forFeature([...])`. There is no central entity list; the CLI finds them by file name
+    (`*.entity.js` under `dist/`).
+  - `synchronize` is **off everywhere** (local, dev, e2e, preprod, prod).
   - SQL logging is on unless `NODE_ENV` is `production` or `test`.
-- **There are no TypeORM migrations.** Preprod and prod have `synchronize` off, so every entity change needs a
-  hand-written SQL file:
-  - Name it with the next number, `scripts/db/NNN-short-name.sql`. It must be idempotent
-    (`IF NOT EXISTS`, …) and mirror the entity exactly.
-  - Add a header comment pointing to the entity file.
-  - List it in the PR description. How to apply it to an environment is under "Build & deploy".
-  - Nothing records which scripts an environment has received; running pending ones automatically on
-    deploy is a follow-up.
+- **Migrations** (`src/database/migrations/`) are the only way the schema changes:
+  - The app runs pending ones at boot (`migrationsRun`), one transaction each, before serving. A failing
+    migration stops the boot. Applied ones are recorded in `tasteep_migrations`.
+  - So starting the app or the e2e suite **migrates whatever DB `POSTGRES_*` / `.env` point at**. Check
+    `.env` first and never casually point it at a database you care about.
+  - To change the schema: change the entity, `npm run migration:generate -- src/database/migrations/<Name>`
+    against a DB that has every existing migration, review the SQL, run `npm run format`, then import the class
+    in `src/database/migrations/index.ts` and append it (they are listed by hand, not globbed).
+  - CI fails when an entity changed without a migration (`migration:check`).
+  - A deploy starts the new container while the old one still serves, so migrations must not break the
+    previous release: add first, drop or rename in a later release.
+  - `1795529563637-Baseline.ts` creates the whole schema on an empty DB, and on an existing one only catches
+    up on what the old `scripts/db/001`/`002` files did. It cannot be reverted.
+  - `scripts/db/*.sql` are the pre-migration history; don't add new ones for schema changes.
 - Naming:
   - Tables are `tasteep_<plural>`.
   - Columns are snake_case via `@Column({ name: 'snake_case' })`.
@@ -157,7 +165,7 @@ It runs as one Nest process against one PostgreSQL database. `README.md` is the 
   - `TasteepWishlistFolder` / `TasteepWishlistItem`
   - `TasteepFeedback`
 - Raw SQL is rare. It goes through `repo.query` / `queryRunner.query` (regions reorder, scraper advisory
-  lock). `pg` is used directly only in `scripts/db/apply-sql.mjs`.
+  lock, migrations). `pg` is used directly only in `scripts/db/apply-sql.mjs`.
 
 ## Configuration
 
@@ -203,7 +211,7 @@ It runs as one Nest process against one PostgreSQL database. `README.md` is the 
 4. Add the controller: `@Controller('tasteep/<x>')`, `@UseGuards(TasteepJwtAuthGuard)`, and `req.user.sub`.
 5. Add the module: `TypeOrmModule.forFeature([Entity])` + `TasteepAuthModule`. Register it in
    `src/tasteep/tasteep.module.ts`.
-6. Add `scripts/db/NNN-*.sql` for preprod and prod.
+6. Generate its migration (`npm run migration:generate`) and register it in `src/database/migrations/index.ts`.
 7. Add unit specs, plus a `test/tasteep-<x>.e2e-spec.ts` if the feature touches the DB.
 8. Update `docs/tasteep-api.md`, the README endpoint table, and `postman/` if relevant.
 
@@ -233,7 +241,7 @@ Runtime variables live in Coolify (tick "Available at runtime"; turn on "Is Lite
 
 | Variable | dev | preprod | prod |
 |---|---|---|---|
-| `NODE_ENV` | `development` (synchronize on) | `production` | `production` |
+| `NODE_ENV` | `development` | `production` | `production` |
 | `FRONTEND_URL` | `https://app.dev.tasteep.eu` (+ admin origin) | `https://app.preprod.tasteep.eu` (+ admin) | `https://app.tasteep.eu` (+ admin) |
 | `APP_URL` | `https://api.dev.tasteep.eu` | `https://api.preprod.tasteep.eu` | `https://api.tasteep.eu` |
 | `TASTEEP_JWT_SECRET`, `TASTEEP_PHOTO_URL_SECRET` | unique | unique | unique |
@@ -280,15 +288,12 @@ as a `404` on `OPTIONS /auth/email`).
 
 ### Schema changes on preprod and prod
 
-To apply a `scripts/db` file to an environment:
+Nothing to do by hand: each environment runs its pending migrations when the new container boots. A promotion
+PR carries the same migrations that already ran on dev (and preprod).
 
-1. Coolify → that environment's backend → **Terminal** (the container's own `POSTGRES_*` are used, there is no
-   `.env`).
-2. Dry run: `node scripts/db/apply-sql.mjs scripts/db/NNN-x.sql`
-3. Apply: the same command with `--yes`.
-
-Apply to **preprod before** merging `dev` → `preprod`, and to **prod before** merging `preprod` → `prod`. The
-dev environment runs `synchronize`, so it needs nothing.
+- Before promoting a release with a migration that rewrites or drops data, take a `pg_dump` of that environment.
+- To inspect an environment: Coolify → its backend → **Terminal** (the container's own `POSTGRES_*`, no `.env`),
+  then `npm run migration:show`, or `npm run migration:check` to compare its schema with the entities.
 
 # Git conventions
 
